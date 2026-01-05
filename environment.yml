@@ -1,0 +1,18 @@
+name: satmvs_res
+dependencies:
+  - python=3.10
+  - pytorch=2.1.0
+  - torchvision=0.16.0
+  - pytorch-cuda=11.8
+  - gdal
+  - numpy
+  - scipy
+  - matplotlib
+  - tensorboard
+  - opencv
+  - pyyaml
+  - tqdm
+  - pip
+  - pip:
+    - tensorboardX
+    - plyfile
