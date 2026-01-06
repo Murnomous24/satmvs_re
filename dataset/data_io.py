@@ -101,6 +101,8 @@ def read_img(file_name):
         res = Image.merge("RGB", (imgs[0], imgs[0], imgs[0]))
     else:
         raise Exception(f"read_img: image's channel must be 3(rgb) or 1(gray), but receive {len(imgs)}")
+    
+    return res
 
 def read_camera(file_name):
     if os.path.exists(file_name) is False:
@@ -144,6 +146,8 @@ def load_pin_as_nn(file_name):
     cam[1][3][0] = np.float64(d_min)
     cam[1][3][1] = np.float64(d_inter)
     cam[1][3][3] = np.float64(d_max)
+
+    return cam
 
 # func test
 # load_pfm("./test_file/test.pfm")
