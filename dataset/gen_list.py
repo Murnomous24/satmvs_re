@@ -1,5 +1,6 @@
 import os
 
+# gen list about one ref view and corresponding source view in pinhole mode
 def gen_ref_list_cam(data_path, view_num, ref_view=2):
     sample_list = []
 
@@ -39,6 +40,7 @@ def gen_ref_list_cam(data_path, view_num, ref_view=2):
     
     return sample_list
 
+# gen list about every ref view and corresponding source view in pinhole mode
 def gen_list_cam(data_path, view_num):
     sample_list = []
 
@@ -79,6 +81,7 @@ def gen_list_cam(data_path, view_num):
 
     return sample_list 
 
+# gen list about one ref view and corresponding source view in rpc mode
 def gen_ref_list_rpc(data_path, view_num, ref_view=2):
     sample_list = []
 
@@ -118,6 +121,7 @@ def gen_ref_list_rpc(data_path, view_num, ref_view=2):
     
     return sample_list    
 
+# gen list about every ref view and corresponding source view in rpc mode
 def gen_list_rpc(data_path, view_num):
     sample_list = []
 

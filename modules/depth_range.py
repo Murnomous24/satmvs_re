@@ -54,11 +54,11 @@ def get_depth_range_samples(cur_depth, ndepth, depth_interval_pixel, device, dty
     # shape: [B, H, W]
     # return depth_range_samples: [B, D, H, W] pixel's depth range
 
-    print("depth_range: start forward")
+    # print("depth_range: start forward")
 
     if cur_depth.dim() == 2:
-        print("depth_range: start same")
+        # print("depth_range: start same")
         return get_same_depth_range(cur_depth, ndepth, device, dtype, shape)
     else: # sub-pixel acc
-        print("depth_range: start pixelwise")
+        # print("depth_range: start pixelwise")
         return get_pixelwise_depth_range(cur_depth, ndepth, depth_interval_pixel, device, dtype, shape)

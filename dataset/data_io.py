@@ -4,6 +4,7 @@ import sys
 import re
 from PIL import Image
 
+# load depth file
 def load_pfm(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("load_pfm: pfm file not find")
@@ -45,6 +46,7 @@ def load_pfm(file_name):
 
     return data
 
+# save depth flie as '.fpm'
 def save_pfm(file_name, image, scale=1):
     file = open(file_name, "wb")
 
@@ -71,6 +73,7 @@ def save_pfm(file_name, image, scale=1):
     endian = '<f' if scale < 0 else '>f'
     data.tofile(file)
 
+# load rpc camera parameter from '.rpc' file
 def load_rpc_as_array(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("load_rpc_as_array: pfm file not find")
@@ -88,6 +91,7 @@ def load_rpc_as_array(file_name):
 
     return data, h_min, h_max
 
+# read image(gray or color)
 def read_img(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("read_img: img file not find")
@@ -104,6 +108,7 @@ def read_img(file_name):
     
     return res
 
+# read pinhole camera parameter
 def read_camera(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("read_camera: camera file not find")
@@ -133,6 +138,7 @@ def read_camera(file_name):
 
     return K, E, d_min, d_max, d_inter
 
+# return pinhole camera parameter numpy's format data
 def load_pin_as_nn(file_name):
     K, E, d_min, d_max, d_inter = read_camera(file_name)
 

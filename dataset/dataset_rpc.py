@@ -3,6 +3,7 @@ from data_io import *
 from preprocess import *
 from gen_list import *
 
+# rpc dataset
 class MVSDataset(Dataset):
     def __init__(
             self,
@@ -20,6 +21,7 @@ class MVSDataset(Dataset):
         self.sample_list = self.build_list()
         self.sample_num = len(self.sample_list)
     
+    # build sample(image, parameter, depth)
     def build_list(self):
         if self.mode == "pred" or self.ref_view < 0:
             sample_list = gen_list_rpc(self.data_path, self.view_num)
@@ -36,6 +38,7 @@ class MVSDataset(Dataset):
 
         return np.array(height_image)
     
+    # get single sample
     def get_sample(self, idx):
         if idx < 0 or idx > self.sample_num - 1:
             raise Exception(f'get_sample: out of bound idx, get {idx}')
@@ -116,6 +119,7 @@ class MVSDataset(Dataset):
             "view_name": view_name
         }
 
+    # get sample in prediction mode
     def get_pred_sample(self, idx):
         if idx < 0 or idx > self.sample_num - 1:
             raise Exception(f'get_sample: out of bound idx, get {idx}')

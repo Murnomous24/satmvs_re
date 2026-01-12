@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# build depth regression from probability cost volume
 def depth_regression(prob, depth_values):
     # prob: [B, Ndepth, H, W]
     # depth_values; [B, Ndepth] or [B, Ndepth, H, W] if sub-pixel
@@ -20,6 +21,7 @@ def depth_regression(prob, depth_values):
     depth = torch.sum(prob * depth_values, 1) 
     return depth
 
+# TODO: initlize the network weight
 def init_uniform(module, init_method):
     if module.weight is not None:
         if init_method == "kaiming":
@@ -27,6 +29,7 @@ def init_uniform(module, init_method):
         elif init_method == "xavier":
             nn.init.xavier_uniform_(module.weight)
 
+# TODO: initlize the batch normal weight
 def init_bn(module):
     if module.weight is not None:
         nn.init.ones_(module.weight)
@@ -161,6 +164,7 @@ class DeConv2dFuse(nn.Module):
         x = self.conv(x)
         return x
 
+# extraction multi stage features
 class FeatureNet(nn.Module):
     def __init__(
             self,
@@ -234,18 +238,18 @@ class FeatureNet(nn.Module):
                 self.out_channels.append(base_channels)
 
     def forward(self, x):
-        print("featurenet forward 1: start forward")
+        # print("featurenet forward 1: start forward")
         conv0 = self.conv0(x)
         conv1 = self.conv1(conv0)
         conv2 = self.conv2(conv1)
 
-        print("featurenet forward 2: conv ok")
+        # print("featurenet forward 2: conv ok")
         intra_feat = conv2
         outputs = {}
 
         out = self.out1(intra_feat)
         outputs["stage1"] = out
-        print("featurenet forward 2: out1 ok")
+        # print("featurenet forward 2: out1 ok")
 
         if self.arch_mode == 'unet':
             if self.num_stage == 3:
@@ -262,26 +266,26 @@ class FeatureNet(nn.Module):
                 outputs["stage2"] = out
         elif self.arch_mode == 'fpn':
             if self.num_stage == 3:
-                print("featurenet forward 3: fpn num_stgae 3 start")
-                print(f"featurenet forward 3: conv0: {conv0.shape}, conv1: {conv1.shape}, conv2: {conv2.shape}")
+                # print("featurenet forward 3: fpn num_stgae 3 start")
+                # print(f"featurenet forward 3: conv0: {conv0.shape}, conv1: {conv1.shape}, conv2: {conv2.shape}")
                 intra_feat = F.interpolate(intra_feat, scale_factor = 2, mode = "nearest") + self.inner1(conv1)
-                print("featurenet forward 3: fpn num_stgae 3 inner1 ok")
+                # print("featurenet forward 3: fpn num_stgae 3 inner1 ok")
                 out = self.out2(intra_feat)
                 outputs["stage2"] = out
-                print("featurenet forward 3: fpn num_stgae 3 out2 ok")
+                # print("featurenet forward 3: fpn num_stgae 3 out2 ok")
 
                 intra_feat = F.interpolate(intra_feat, scale_factor = 2, mode = "nearest") + self.inner2(conv0)
-                print("featurenet forward 3: fpn num_stgae 3 inner2 ok")
+                # print("featurenet forward 3: fpn num_stgae 3 inner2 ok")
                 out = self.out3(intra_feat)
                 outputs["stage3"] = out
-                print("featurenet forward 3: fpn num_stgae 3 out3 ok")
+                # print("featurenet forward 3: fpn num_stgae 3 out3 ok")
             elif self.num_stage == 2:
-                print("featurenet forward 3: fpn num_stgae 2 start")
+                # print("featurenet forward 3: fpn num_stgae 2 start")
                 intra_feat = F.interpolate(intra_feat, scale_factor = 2, mode = "nearest") + self.inner1(conv1)
-                print("featurenet forward 3: fpn num_stgae 2 inner1 ok")
+                # print("featurenet forward 3: fpn num_stgae 2 inner1 ok")
                 out = self.out2(intra_feat)
                 outputs["stage2"] = out
-                print("featurenet forward 3: fpn num_stgae 3 out2 ok")
+                # print("featurenet forward 3: fpn num_stgae 3 out2 ok")
         
         return outputs
 
@@ -378,6 +382,7 @@ class Deconv3d(nn.Module):
         if self.bn is not None:
             init_bn(self.bn)
 
+# cost volume regularization
 class CostRegNet(nn.Module):
     def __init__(self, in_channels, base_channels):
         super().__init__()
@@ -408,9 +413,9 @@ class CostRegNet(nn.Module):
         x = self.conv6(self.conv5(conv4))
 
         up7 = self.conv7(x)
-        print(f"DEBUG: conv4 shape: {conv4.shape}, up7 shape: {up7.shape}")
+        # print(f"DEBUG: conv4 shape: {conv4.shape}, up7 shape: {up7.shape}")
         x = conv4 + self.conv7(x)
-        print(f"debug 1 success")
+        # print(f"debug 1 success")
         x = conv2 + self.conv9(x)
         x = conv0 + self.conv11(x)
         x = self.prob(x)
@@ -433,6 +438,7 @@ class ConvBnReLU(nn.Module):
     def forward(self, x):
         return F.relu(self.bn(self.conv(x)), inplace = True)
 
+# depth map refine network
 class RefineNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -443,9 +449,9 @@ class RefineNet(nn.Module):
         self.res = ConvBnReLU(32, 1)
     
     def forward(self, image, depth_init):
-        print(f"refinenet forward: image: {image.shape}, depth_init: {depth_init.shape}")
+        # print(f"refinenet forward: image: {image.shape}, depth_init: {depth_init.shape}")
         concat = torch.cat((image, depth_init), dim = 1) # TODO: F.cat or torch.cat?
-        print(f"refinenet forward: concat: {concat.shape}")
+        # print(f"refinenet forward: concat: {concat.shape}")
         depth_res = self.res(self.conv3(self.conv2(self.conv1(concat))))
         depth_refined = depth_init + depth_res
 

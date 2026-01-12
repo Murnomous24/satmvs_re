@@ -221,37 +221,38 @@ def rpc_warping(src_fea, src_rpc, ref_rpc, depth_values, coef):
 
         return warped_src_fea
 
-if __name__ == "__main__":
-    import numpy as np
+# test code
+# if __name__ == "__main__":
+#     import numpy as np
 
-    B, C, H, W = 1, 8, 32, 64
-    Ndepth = 4
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     B, C, H, W = 1, 8, 32, 64
+#     Ndepth = 4
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    src_fea = torch.randn(B, C, H, W).to(device)
-    depth_values = torch.linspace(10.0, 50.0, Ndepth).view(1, Ndepth).repeat(B, 1).to(device) # [B, Ndepth]
-    print(f"src_fea: {src_fea.shape}")
-    print(f"ndepth: {Ndepth}")
+#     src_fea = torch.randn(B, C, H, W).to(device)
+#     depth_values = torch.linspace(10.0, 50.0, Ndepth).view(1, Ndepth).repeat(B, 1).to(device) # [B, Ndepth]
+#     print(f"src_fea: {src_fea.shape}")
+#     print(f"ndepth: {Ndepth}")
 
-    print("pinhole_warping...")
-    ref_proj = torch.eye(4).unsqueeze(0).repeat(B, 1, 1).to(device) # [B, 4, 4]
-    src_proj = torch.eye(4).unsqueeze(0).repeat(B, 1, 1).to(device) # [B, 4, 4]
-    src_proj[:, 0, 3] = 0.1
-    try:
-        warped_pinhole = pinhole_warping(src_fea, src_proj, ref_proj, depth_values)
-        print(f"pinhole warping success, shape: {warped_pinhole.shape}")
-    except Exception as e:
-        print(f"pinhole warping failed: {e}")
+#     print("pinhole_warping...")
+#     ref_proj = torch.eye(4).unsqueeze(0).repeat(B, 1, 1).to(device) # [B, 4, 4]
+#     src_proj = torch.eye(4).unsqueeze(0).repeat(B, 1, 1).to(device) # [B, 4, 4]
+#     src_proj[:, 0, 3] = 0.1
+#     try:
+#         warped_pinhole = pinhole_warping(src_fea, src_proj, ref_proj, depth_values)
+#         print(f"pinhole warping success, shape: {warped_pinhole.shape}")
+#     except Exception as e:
+#         print(f"pinhole warping failed: {e}")
 
-    print("rpc_warping...")
-    rpc_dummy = torch.zeros(B, 170).to(device) # [B, 170]
-    rpc_dummy[:, 5:10] = 1.0  # LINE_SCALE, SAMP_SCALE, LAT_SCALE, LONG_SCALE, HEIGHT_SCALE
-    rpc_dummy[:, 30] = 1.0; rpc_dummy[:, 70] = 1.0
-    rpc_dummy[:, 110] = 1.0; rpc_dummy[:, 150] = 1.0
-    rpc_dummy[:, 11] = 1.0; rpc_dummy[:, 52] = 1.0
-    coef_buffer = torch.zeros(B, Ndepth * H * W, 20).to(device).double() # [B, Ndepth * H * W, 20]
-    try:
-        warped_rpc = rpc_warping(src_fea, rpc_dummy, rpc_dummy, depth_values, coef_buffer)
-        print(f"RPC Warping success. shape: {warped_rpc.shape}")
-    except Exception as e:
-        print(f"RPC Warping failed: {e}")
+#     print("rpc_warping...")
+#     rpc_dummy = torch.zeros(B, 170).to(device) # [B, 170]
+#     rpc_dummy[:, 5:10] = 1.0  # LINE_SCALE, SAMP_SCALE, LAT_SCALE, LONG_SCALE, HEIGHT_SCALE
+#     rpc_dummy[:, 30] = 1.0; rpc_dummy[:, 70] = 1.0
+#     rpc_dummy[:, 110] = 1.0; rpc_dummy[:, 150] = 1.0
+#     rpc_dummy[:, 11] = 1.0; rpc_dummy[:, 52] = 1.0
+#     coef_buffer = torch.zeros(B, Ndepth * H * W, 20).to(device).double() # [B, Ndepth * H * W, 20]
+#     try:
+#         warped_rpc = rpc_warping(src_fea, rpc_dummy, rpc_dummy, depth_values, coef_buffer)
+#         print(f"RPC Warping success. shape: {warped_rpc.shape}")
+#     except Exception as e:
+#         print(f"RPC Warping failed: {e}")
