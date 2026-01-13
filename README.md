@@ -5,3 +5,4 @@
 - 26/1/7: finish `warping.py`
 - 26/1/9: part of `modules/` and `networks/`, mainly focus on DepthNet
 - 26/1/10: basic `modules/` and finish `networks/casmvs.py`, test network on pinhole/rpc
+- 26/1/12: part of `train.py`

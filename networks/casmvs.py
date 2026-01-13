@@ -22,7 +22,9 @@ class DepthNet(nn.Module):
             geo_model, # TODO
     ):
         # print("depthnet forward 0: start forward")
-        assert len(features) == len(proj_matrices), f"casmvs: features and projection matrices do not match"
+
+        proj_matrices = torch.unbind(proj_matrices, 1) # [B, N, 4, 4] tensor to length Nview's python list
+        assert len(features) == len(proj_matrices), f"casmvs: features and projection matrices do not match, get {len(features)} and {len(proj_matrices)}"
         assert depth_values.shape[1] == num_depth, f"casmvs: depth_values's depth number do not match num_depth, depth_values.shape[1]: {depth_values.shape[1]}, num_depth: {num_depth}"
 
         # set up feature map and projection matrices
@@ -37,7 +39,7 @@ class DepthNet(nn.Module):
 
         if geo_model == "rpc":
             batch, fea, height, width = ref_fea.shape
-            coef = torch.ones((batch, height * width * num_depth, 20), dtype = torch.double) # [B, H * W * Ndepth, 20]
+            coef = torch.ones((batch, height * width * num_depth, 20), dtype = torch.double).cuda() # [B, H * W * Ndepth, 20]
         elif geo_model == "pinhole":
             coef = None
         else:
@@ -226,166 +228,166 @@ class CascadeMVSNet(nn.Module):
         # print("cascade forward 7: refine ok")
         return outputs
             
-# test code below
-def test_cascademvs_pinhole():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 1
-    num_views = 3
-    height, width = 512, 640
-    ndepths = [48, 32, 8]
+# # test code below
+# def test_cascademvs_pinhole():
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     batch_size = 1
+#     num_views = 3
+#     height, width = 512, 640
+#     ndepths = [48, 32, 8]
 
-    model = CascadeMVSNet(
-        geo_model = "pinhole",
-        refine = True,
-        ndepths = ndepths,
-        arch_mode = "fpn"
-    ).to(device)
-    model.eval()
-    print("1: model initialization")
+#     model = CascadeMVSNet(
+#         geo_model = "pinhole",
+#         refine = True,
+#         ndepths = ndepths,
+#         arch_mode = "fpn"
+#     ).to(device)
+#     model.eval()
+#     print("1: model initialization")
 
-    images = torch.randn(
-        batch_size,
-        num_views,
-        3,
-        height,
-        width
-    ).to(device) # [B, Nview, C, H, W]
+#     images = torch.randn(
+#         batch_size,
+#         num_views,
+#         3,
+#         height,
+#         width
+#     ).to(device) # [B, Nview, C, H, W]
 
-    # python list style projection matrices
-    single_proj = torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1).to(device) # [1, 4, 4]
-    proj_list = [single_proj for _ in range(num_views)]
-    proj_matrices = {
-        "stage1": proj_list,
-        "stage2": proj_list,
-        "stage3": proj_list
-    }
+#     # python list style projection matrices
+#     single_proj = torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1).to(device) # [1, 4, 4]
+#     proj_list = [single_proj for _ in range(num_views)]
+#     proj_matrices = {
+#         "stage1": proj_list,
+#         "stage2": proj_list,
+#         "stage3": proj_list
+#     }
 
-    # proj_matrix = torch.eye(4).view(1, 1, 4, 4).repeat(batch_size, num_views, 1, 1).to(device) # [B, Nview, 4, 4]
-    # proj_matrices = {
-    #     "stage1": proj_matrix,
-    #     "stage2": proj_matrix,
-    #     "stage3": proj_matrix
-    # }
+#     # proj_matrix = torch.eye(4).view(1, 1, 4, 4).repeat(batch_size, num_views, 1, 1).to(device) # [B, Nview, 4, 4]
+#     # proj_matrices = {
+#     #     "stage1": proj_matrix,
+#     #     "stage2": proj_matrix,
+#     #     "stage3": proj_matrix
+#     # }
 
-    init_depth = torch.ones(batch_size, height, width).to(device) * 10.0
+#     init_depth = torch.ones(batch_size, height, width).to(device) * 10.0
 
-    print("2: input ok")
-    try:
-        with torch.no_grad():
-            outputs = model(images, proj_matrices, init_depth)
+#     print("2: input ok")
+#     try:
+#         with torch.no_grad():
+#             outputs = model(images, proj_matrices, init_depth)
 
-            for stage in ["stage1", "stage2", "stage3"]:
-                if stage in outputs:
-                    depth = outputs[stage]["depth"]
-                    conf = outputs[stage]["photometric_confidence"]
-                    print(f"[{stage}] depth shape: {list(depth.shape)}, photometric shape: {list(conf.shape)}")
+#             for stage in ["stage1", "stage2", "stage3"]:
+#                 if stage in outputs:
+#                     depth = outputs[stage]["depth"]
+#                     conf = outputs[stage]["photometric_confidence"]
+#                     print(f"[{stage}] depth shape: {list(depth.shape)}, photometric shape: {list(conf.shape)}")
             
-            if "refine_depth" in outputs:
-                print(f"refined depth map: {list(outputs['refine_depth'].shape)}")
-    except Exception as e:
-        print(f"error: {e}")
+#             if "refine_depth" in outputs:
+#                 print(f"refined depth map: {list(outputs['refine_depth'].shape)}")
+#     except Exception as e:
+#         print(f"error: {e}")
 
-    print("3: network ok")
+#     print("3: network ok")
 
 
-# test rpc
-import numpy as np
-import os
-def load_rpc_as_array(file_name):
-    if os.path.exists(file_name) is False:
-        raise Exception("load_rpc_as_array: pfm file not find")
+# # test rpc
+# import numpy as np
+# import os
+# def load_rpc_as_array(file_name):
+#     if os.path.exists(file_name) is False:
+#         raise Exception("load_rpc_as_array: pfm file not find")
 
-    file = open(file_name, 'r')
+#     file = open(file_name, 'r')
 
-    full_text = file.read().splitlines()
-    data = [line.split(' ')[1] for line in full_text]
-    # print(data)
+#     full_text = file.read().splitlines()
+#     data = [line.split(' ')[1] for line in full_text]
+#     # print(data)
 
-    data = np.array(data, dtype = np.float64)
+#     data = np.array(data, dtype = np.float64)
     
-    h_min = data[4] - data[9]
-    h_max = data[4] + data[9]
+#     h_min = data[4] - data[9]
+#     h_max = data[4] + data[9]
 
-    return data, h_min, h_max
-def test_cascademvs_rpc():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 1
-    num_views = 3
-    height, width = 512, 640
-    ndepths = [48, 32, 8]
+#     return data, h_min, h_max
+# def test_cascademvs_rpc():
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     batch_size = 1
+#     num_views = 3
+#     height, width = 512, 640
+#     ndepths = [48, 32, 8]
 
-    model = CascadeMVSNet(
-        geo_model = "rpc",
-        refine = True,
-        ndepths = ndepths,
-        arch_mode = "fpn"
-    ).to(device)
-    model.eval()
-    print("1: RPC model initialization")
+#     model = CascadeMVSNet(
+#         geo_model = "rpc",
+#         refine = True,
+#         ndepths = ndepths,
+#         arch_mode = "fpn"
+#     ).to(device)
+#     model.eval()
+#     print("1: RPC model initialization")
 
-    images = torch.randn(
-        batch_size,
-        num_views,
-        3,
-        height,
-        width
-    ).to(device)
+#     images = torch.randn(
+#         batch_size,
+#         num_views,
+#         3,
+#         height,
+#         width
+#     ).to(device)
 
     
-    try:
-        rpc_path = '/home/murph_dl/Paper_Re/SatMVS_Re/test_file/test_dataset_rpc/rpc/0/base0000block0016.rpc'
-        rpc_data, h_min, h_max = load_rpc_as_array(rpc_path)
+#     try:
+#         rpc_path = '/home/murph_dl/Paper_Re/SatMVS_Re/test_file/test_dataset_rpc/rpc/0/base0000block0016.rpc'
+#         rpc_data, h_min, h_max = load_rpc_as_array(rpc_path)
 
-        rpc_para = []
-        rpc_para.append(rpc_data)
-        rpc_para = np.stack(rpc_para)
+#         rpc_para = []
+#         rpc_para.append(rpc_data)
+#         rpc_para = np.stack(rpc_para)
 
-        rpc_tensor = torch.from_numpy(rpc_para).float().to(device)
-        print(f"rpc_tensor: {rpc_tensor.shape}")
+#         rpc_tensor = torch.from_numpy(rpc_para).float().to(device)
+#         print(f"rpc_tensor: {rpc_tensor.shape}")
         
-    except Exception as e:
-        print(f"Warning: Could not load RPC file, using zero dummy. Error: {e}")
-        rpc_tensor = torch.zeros(batch_size, 170).to(device)
+#     except Exception as e:
+#         print(f"Warning: Could not load RPC file, using zero dummy. Error: {e}")
+#         rpc_tensor = torch.zeros(batch_size, 170).to(device)
 
-    rpc_list = [rpc_tensor for _ in range(num_views)]
-    proj_matrices = {
-        "stage1": rpc_list,
-        "stage2": rpc_list,
-        "stage3": rpc_list
-    }
+#     rpc_list = [rpc_tensor for _ in range(num_views)]
+#     proj_matrices = {
+#         "stage1": rpc_list,
+#         "stage2": rpc_list,
+#         "stage3": rpc_list
+#     }
 
-    # single_rpc = torch.zeros(batch_size, 170).to(device)
-    # single_rpc[:, 5:10] = 1.0  
-    # single_rpc[:, 30] = 1.0
-    # single_rpc[:, 70] = 1.0
-    # single_rpc[:, 110] = 1.0
-    # rpc_list = [single_rpc for _ in range(num_views)]
-    # proj_matrices = {
-    #     "stage1": rpc_list,
-    #     "stage2": rpc_list,
-    #     "stage3": rpc_list
-    # }
+#     # single_rpc = torch.zeros(batch_size, 170).to(device)
+#     # single_rpc[:, 5:10] = 1.0  
+#     # single_rpc[:, 30] = 1.0
+#     # single_rpc[:, 70] = 1.0
+#     # single_rpc[:, 110] = 1.0
+#     # rpc_list = [single_rpc for _ in range(num_views)]
+#     # proj_matrices = {
+#     #     "stage1": rpc_list,
+#     #     "stage2": rpc_list,
+#     #     "stage3": rpc_list
+#     # }
 
-    init_depth = torch.ones(batch_size, height, width).to(device) * 10.0
+#     init_depth = torch.ones(batch_size, height, width).to(device) * 10.0
 
-    print("2: RPC input ok")
+#     print("2: RPC input ok")
 
-    try:
-        with torch.no_grad():
-            outputs = model(images, proj_matrices, init_depth)
+#     try:
+#         with torch.no_grad():
+#             outputs = model(images, proj_matrices, init_depth)
 
-            for stage in ["stage1", "stage2", "stage3"]:
-                if stage in outputs:
-                    depth = outputs[stage]["depth"]
-                    conf = outputs[stage]["photometric_confidence"]
-                    print(f"[{stage}] RPC depth shape: {list(depth.shape)}, photometric shape: {list(conf.shape)}")
+#             for stage in ["stage1", "stage2", "stage3"]:
+#                 if stage in outputs:
+#                     depth = outputs[stage]["depth"]
+#                     conf = outputs[stage]["photometric_confidence"]
+#                     print(f"[{stage}] RPC depth shape: {list(depth.shape)}, photometric shape: {list(conf.shape)}")
         
-            if "refine_depth" in outputs:
-                print(f"Refined RPC depth map shape: {list(outputs['refine_depth'].shape)}")
-    except Exception as e:
-        print(f"RPC testing error: {e}")
+#             if "refine_depth" in outputs:
+#                 print(f"Refined RPC depth map shape: {list(outputs['refine_depth'].shape)}")
+#     except Exception as e:
+#         print(f"RPC testing error: {e}")
 
-    print("3: RPC network ok")
+#     print("3: RPC network ok")
 
 # if __name__ == "__main__":
 #     test_cascademvs_pinhole()

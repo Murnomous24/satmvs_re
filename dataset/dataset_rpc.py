@@ -1,7 +1,8 @@
 from torch.utils.data import Dataset
-from data_io import *
-from preprocess import *
-from gen_list import *
+from dataset.data_io import *
+from dataset.preprocess import *
+from dataset.gen_list import *
+import copy
 
 # rpc dataset
 class MVSDataset(Dataset):

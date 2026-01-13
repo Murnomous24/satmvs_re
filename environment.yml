@@ -1,11 +1,8 @@
 name: satmvs_res
 dependencies:
   - python=3.10
-  - pytorch=2.1.0
-  - torchvision=0.16.0
-  - pytorch-cuda=11.8
   - gdal
-  - numpy
+  - numpy<2.0
   - scipy
   - matplotlib
   - tensorboard
@@ -14,5 +11,8 @@ dependencies:
   - tqdm
   - pip
   - pip:
+    - torch==2.1.0
+    - torchvision==0.16.0
+    - torchaudio==2.1.0
     - tensorboardX
     - plyfile
