@@ -192,8 +192,6 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     loss.backward()
     # TODO: each batch or each loop?
     optimizer.step()
-    lr_scheduler.step()
-
 
     # get metrices
     num_stage = len([int(depth) for depth in args.ndepths.split(",") if depth])
@@ -206,9 +204,9 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     }
     image_outputs = {
         "depth_est": depth_est,
-        "depth_gt": sample["depth"]["stage1"], # TODO: why stage1
+        "depth_gt": sample["depth"]["stage3"], # TODO: why stage1
         "ref_image": sample["images"][:, 0],
-        "mask": sample["mask"]["stage1"]  # TODO: why stage1
+        "mask": sample["mask"]["stage3"]  # TODO: why stage1
     }
 
     # summary if needed
@@ -258,9 +256,9 @@ def test_batch(sample, detailed_summary = False):
     image_outputs = {
         "depth_est": depth_est,
         "photometric_confidence": photometric_confidence,
-        "depth_gt": sample["depth"]["stage1"],  # TODO: why stage1
+        "depth_gt": sample["depth"]["stage3"],  # TODO: why stage1
         "ref_image": sample["images"][:, 0],
-        "mask": sample["mask"]["stage1"]  # TODO: why stage1
+        "mask": sample["mask"]["stage3"]  # TODO: why stage1
     }
 
     # summary if needed
@@ -290,7 +288,7 @@ def train():
 
         # train
         for batch_idx, sample in enumerate(train_loader):
-            start_time = time.time()
+            start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
             
@@ -300,33 +298,42 @@ def train():
                 detailed_summary = bool_summary
             )
             
+            torch.cuda.synchronize()
+            batch_time = time.perf_counter() - start_time
+
             if bool_summary:
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
-            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {time.time() - start_time}, train_result = {scalar_outputs}')
+            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
             del scalar_outputs, image_outputs
     
         # test
         avg_test_scalars = DictAverageMeter()
         for batch_idx, sample in enumerate(test_loader):
-            start_time = time.time()
+            start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
 
             loss, scalar_outputs, image_outputs = test_batch(
                 sample,
-                detailed_summary = bool_summary
+                detailed_summary = True
             )
+
+            torch.cuda.synchronize()
+            batch_time = time.perf_counter() - start_time
 
             if bool_summary:
                 save_scalars(logger, 'test', scalar_outputs, global_step)
                 save_images(logger, 'test', image_outputs, global_step)
             avg_test_scalars.update(scalar_outputs) # update scalars
             
-            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, test loss = {loss}, time = {time.time() - start_time}, train_result = {scalar_outputs}')
+            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, test loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
             del scalar_outputs, image_outputs
         save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")
+
+        # lr update
+        lr_scheduler.step()
 
         # write log
         record_path = os.path.join(cur_log_dir, 'train_record.txt')
