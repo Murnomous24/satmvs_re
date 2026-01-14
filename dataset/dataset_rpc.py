@@ -49,7 +49,7 @@ class MVSDataset(Dataset):
 
         centered_images = [] # TODO: why this name
         rpc_para = []
-        _, height_min, height_max = load_rpc_as_array(data[1]) # read height range from rpc file
+        _, height_min, height_max = load_rpc_as_array(data[2 * self.ref_view + 1]) # read height range from rpc file
 
         # read ref/source image and rpc parameters
         for v_idx in range(self.view_num):
@@ -73,7 +73,7 @@ class MVSDataset(Dataset):
         height_values = np.array([height_min, height_max], dtype=np.float32)
 
         # multi stage height map
-        height_image = load_pfm(data[2 * self.view_num]).astype(np.float32) # height map file path stay last
+        height_image = self.read_depth(data[2 * self.view_num]) # height map file path stay last
         h, w = height_image.shape
         height_ms = {
             "stage1": cv2.resize(height_image, (w // 4, h // 4), interpolation=cv2.INTER_NEAREST),

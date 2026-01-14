@@ -6,7 +6,7 @@ from modules.module import *
 from modules.warping import *
 from modules.depth_range import *
 
-Align_Corners_Range = True
+Align_Corners_Range = False # TODO: what
 
 class DepthNet(nn.Module):
     def __init__(self):
@@ -216,14 +216,14 @@ class CascadeMVSNet(nn.Module):
 
             # print("cascade forward 5: depthnet ok")
             # add to output
-            depth = output_stage['depth']
+            last_depth = output_stage['depth']
             outputs[f"stage{index + 1}"] = output_stage
             outputs.update(output_stage) # TODO: update what
         
         # print("cascade forward 6: multi-stage ok")
         # print(f"depth: {depth.shape}")
         if self.refine:
-            refine_depth = self.refine_network(images[:, 0], depth.unsqueeze(1))
+            refine_depth = self.refine_network(images[:, 0], last_depth.unsqueeze(1))
             outputs["refine_depth"] = refine_depth
         # print("cascade forward 7: refine ok")
         return outputs

@@ -196,8 +196,10 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     # get metrices
     num_stage = len([int(depth) for depth in args.ndepths.split(",") if depth])
     depth_est = outputs[f"stage{num_stage}"]["depth"]
+    photometric_confidence = outputs[f"stage{num_stage}"]["photometric_confidence"]
     depth_final_gt = depth_gt_ms[f"stage{num_stage}"]
     mask_final = mask_ms[f"stage{num_stage}"]
+    
     scalar_outputs = {
         "loss": loss,
         "depth_loss": depth_loss
@@ -213,9 +215,12 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     if detailed_summary:
         image_outputs["errormap"] = (depth_est - depth_final_gt).abs() * mask_final
         scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
-        scalar_outputs["threshold_1.0m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
-        scalar_outputs["threshold_2.5m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
-        scalar_outputs["threshold_7.5m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
+        scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["threshold_1.0m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
+        scalar_outputs["threshold_2.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
+        scalar_outputs["threshold_7.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
+        scalar_outputs["completeness"] = Completeness_metrics(photometric_confidence, depth_final_gt, mask_final > 0.5)
     
     return tensor2float(loss), tensor2float(scalar_outputs), image_outputs
 
@@ -265,9 +270,12 @@ def test_batch(sample, detailed_summary = False):
     if detailed_summary:
         image_outputs["errormap"] = (depth_est - depth_final_gt).abs() * mask_final
         scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
-        scalar_outputs["threshold_1.0m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
-        scalar_outputs["threshold_2.5m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
-        scalar_outputs["threshold_7.5m_error"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
+        scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["threshold_1.0m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
+        scalar_outputs["threshold_2.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
+        scalar_outputs["threshold_7.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
+        scalar_outputs["completeness"] = Completeness_metrics(photometric_confidence, depth_final_gt, mask_final > 0.5)
     
     return tensor2float(loss), tensor2float(scalar_outputs), image_outputs
 

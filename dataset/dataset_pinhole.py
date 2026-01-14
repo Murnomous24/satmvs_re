@@ -47,7 +47,7 @@ class MVSDataset(Dataset):
         data = self.sample_list[idx] # get sample(ref and source)
         # data: [ref_img, ref_para, source1_img, source1_para, ..., ref_height]
 
-        centered_images = [] # TODO: why this name
+        centered_images = []
         proj_matrices = []
         depth_min = None
         depth_max = None
@@ -131,7 +131,7 @@ class MVSDataset(Dataset):
         data = self.sample_list[idx] # get sample(ref and source)
         # data: [ref_img, ref_para, source1_img, source1_para, ..., ref_height]
 
-        centered_images = [] # TODO: why this name
+        centered_images = []
         proj_matrices = []
         depth_min = None
         depth_max = None
@@ -139,10 +139,7 @@ class MVSDataset(Dataset):
         # read ref/source image and camera parameters
         for v_idx in range(self.view_num):
             # image
-            if self.mode == "train":
-                image = image_augment(read_img(data[2 * v_idx]))
-            else:
-                image = read_img(data[2 * v_idx])
+            image = read_img(data[2 * v_idx])
             image = np.array(image)
 
             # camera parameters
@@ -161,7 +158,7 @@ class MVSDataset(Dataset):
             centered_images.append(image)
         # change shape
         proj_matrices = np.stack(proj_matrices)
-        centered_images = np.stack(center_image(centered_images)).transpose([0, 3, 1, 2]) # assume [view_num, H, W, C] -> [view_num, C, H, W](opencv -> pytorch)
+        centered_images = np.stack(centered_images).transpose([0, 3, 1, 2]) # assume [view_num, H, W, C] -> [view_num, C, H, W](opencv -> pytorch)
 
         # depth range
         depth_values = np.array([depth_min, depth_max], dtype=np.float32)

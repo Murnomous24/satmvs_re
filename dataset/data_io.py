@@ -48,41 +48,38 @@ def load_pfm(file_name):
 
 # save depth flie as '.fpm'
 def save_pfm(file_name, image, scale=1):
-    file = open(file_name, "wb")
+    with open(file_name, "wb") as file:
+        if image.dtype != np.float32:
+            raise Exception(f"save_pfm: image dtype must be 'float32', but receive {image.dtype}")
 
-    if image.dtype != np.float32:
-        raise Exception(f"save_pfm: image dtype must be 'float32', but receive {image.dtype}")
+        if image.ndim == 3 and image.shape[2] == 3:
+            color = True
+            ident = "PF"
+        elif image.ndim == 2 or (image.ndim == 3 and image.shape[2] == 1):
+            color = False
+            ident = "Pf"
+        else:
+            raise Exception(f"save_pfm: Image's shape is invaild, receive {image.shape}")
 
-    if image.ndim == 3 and image.shape[2] == 3:
-        color = True
-        ident = "PF"
-    elif image.ndim == 2 or (image.ndim == 3 and image.shape[2] == 1):
-        color = False
-        ident = "Pf"
-    else:
-        raise Exception(f"save_pfm: Image's shape is invaild, receive {image.shape}")
+        endian = image.dtype.byteorder
+        if endian == '<' or (endian == '=' and sys.byteorder == 'little'):
+            scale = -scale
 
-    endian = image.dtype.byteorder
-    if endian == '<' or (endian == '=' and sys.byteorder == 'little'):
-        scale = -scale
+        header = f"{ident}\n{image.shape[1]} {image.shape[0]}\n{scale}\n"
+        file.write(header.encode('ascii'))
 
-    header = f"{ident}\n{image.shape[1]} {image.shape[0]}\n{scale}\n"
-    file.write(header.encode('ascii'))
-
-    data = np.flip(image, 0)
-    endian = '<f' if scale < 0 else '>f'
-    data.tofile(file)
+        target_dtype = '<f' if scale < 0 else '>f'
+        data = np.flip(image, 0).astype(target_dtype)
+        data.tofile(file)
 
 # load rpc camera parameter from '.rpc' file
 def load_rpc_as_array(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("load_rpc_as_array: pfm file not find")
 
-    file = open(file_name, 'r')
-
-    full_text = file.read().splitlines()
+    with open(file_name, 'r') as file:
+        full_text = file.read().splitlines()
     data = [line.split(' ')[1] for line in full_text]
-    # print(data)
 
     data = np.array(data, dtype = np.float64)
     
@@ -113,8 +110,8 @@ def read_camera(file_name):
     if os.path.exists(file_name) is False:
         raise Exception("read_camera: camera file not find")
     
-    file = open(file_name, "r")
-    all_text = file.read().splitlines()
+    with open(file_name, 'r') as file:
+        all_text = file.read().splitlines()
 
     E = np.array(
         [[float(e) for e in all_text[0].split()],

@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torchvision.utils as vutils
+import cv2
 
 # torch.no_grad warpper for functions
 def make_nograd_func(func): # TODO what means
@@ -67,6 +68,35 @@ def Threshold_metrics(depth_est, depth_gt, mask, thres):
     errors = torch.abs(depth_est - depth_gt)
     err_mask = errors < thres
     return torch.mean(err_mask.float())
+
+@make_nograd_func
+@compute_metrics_for_each_image
+def MAE_metrics(depth_est, depth_gt, mask):
+    depth_est, depth_gt = depth_est[mask], depth_gt[mask]
+    if depth_est.numel() == 0:
+        return torch.tensor(0.0, device=depth_est.device)
+    
+    abs_diff = (depth_est - depth_gt).abs()
+    return torch.mean(abs_diff)
+
+@make_nograd_func
+@compute_metrics_for_each_image
+def RMSE_metrics(depth_est, depth_gt, mask):
+    depth_est, depth_gt = depth_est[mask], depth_gt[mask]
+    if depth_est.numel() == 0:
+        return torch.tensor(0.0, device=depth_est.device)
+    
+    square_diff = (depth_est - depth_gt) ** 2
+    return torch.sqrt(torch.mean(square_diff))
+
+@make_nograd_func
+@compute_metrics_for_each_image
+def Completeness_metrics(depth_est, depth_gt, mask, conf_thres=0.8):
+    valid_mask = (depth_est > conf_thres) # depth_est is photometric_confidence to meet '@compute_metrics_for_each_image' format requirement
+
+    if mask.sum() == 0:
+        return torch.tensor(0.0, device=depth_est.device)
+    return torch.mean(valid_mask[mask].float())
 
 @make_recursive_func
 def tensor2float(vars):
@@ -138,3 +168,26 @@ class DictAverageMeter(object):
 
     def mean(self):
         return {k: v / self.count for k, v in self.data.items()}
+
+def visualize_depth(depth, mask=None, min_val=None, max_val=None):
+    if mask is not None:
+        depth = np.where(mask > 0.5, depth, 0)
+        
+    if min_val is None:
+        min_val = np.percentile(depth[depth > 0], 5) if np.any(depth > 0) else 0
+    if max_val is None:
+        max_val = np.percentile(depth[depth > 0], 95) if np.any(depth > 0) else 1
+
+    depth_norm = (depth - min_val) / (max_val - min_val + 1e-6)
+    depth_norm = np.clip(depth_norm, 0, 1)
+    depth_int = (depth_norm * 255).astype(np.uint8)
+    
+    return cv2.applyColorMap(depth_int, cv2.COLORMAP_MAGMA)
+
+def unnormalize_image(img_tensor):
+    img = tensor2numpy(img_tensor) # [3, H, W]
+    img = np.transpose(img, (1, 2, 0)) # [H, W, 3]
+    
+    img_min, img_max = img.min(), img.max()
+    img = (img - img_min) / (img_max - img_min + 1e-6)
+    return (img * 255).astype(np.uint8)

@@ -152,7 +152,6 @@ class DeConv2dFuse(nn.Module):
             kernel_size,
             stride = 1,
             padding = 1,
-            out_padding = 1,
             bn = True,
             relu = relu,
             bn_momentum = bn_momentum
@@ -412,10 +411,7 @@ class CostRegNet(nn.Module):
         conv4 = self.conv4(self.conv3(conv2))
         x = self.conv6(self.conv5(conv4))
 
-        up7 = self.conv7(x)
-        # print(f"DEBUG: conv4 shape: {conv4.shape}, up7 shape: {up7.shape}")
         x = conv4 + self.conv7(x)
-        # print(f"debug 1 success")
         x = conv2 + self.conv9(x)
         x = conv0 + self.conv11(x)
         x = self.prob(x)
