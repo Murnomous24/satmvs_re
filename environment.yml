@@ -1,4 +1,4 @@
-name: satmvs_res
+name: satmvs_re
 dependencies:
   - python=3.10
   - gdal
