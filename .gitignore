@@ -2,3 +2,4 @@ test_file/
 __pycache__/
 data/
 checkpoints/
+.venv/

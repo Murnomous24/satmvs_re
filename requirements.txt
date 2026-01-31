@@ -1,0 +1,13 @@
+gdal
+numpy<2.0
+scipy
+matplotlib
+tensorboard
+opencv-python
+pyyaml
+tqdm
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+tensorboardX
+plyfile
