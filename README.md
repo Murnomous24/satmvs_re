@@ -11,4 +11,5 @@
 
 # TODO
 - [] 排查 completeness 异常的问题
+- [] 进行训练性能、速度排查和修正
 - [] 加入 feature volume 的融合机制
