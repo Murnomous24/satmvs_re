@@ -8,3 +8,7 @@
 - 26/1/12: part of `train.py`
 - 26/1/13: fix some error, overfitting training on small sample
 - 26/1/14: finish `predict.py`
+
+# TODO
+- [] 排查 completeness 异常的问题
+- [] 加入 feature volume 的融合机制
