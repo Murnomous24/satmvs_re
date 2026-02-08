@@ -3,6 +3,7 @@ import os
 import sys
 import re
 from PIL import Image
+from osgeo import gdal
 
 # load depth file
 def load_pfm(file_name):
@@ -75,7 +76,7 @@ def save_pfm(file_name, image, scale=1):
 # load rpc camera parameter from '.rpc' file
 def load_rpc_as_array(file_name):
     if os.path.exists(file_name) is False:
-        raise Exception("load_rpc_as_array: pfm file not find")
+        raise Exception("load_rpc_as_array: rpc file not find")
 
     with open(file_name, 'r') as file:
         full_text = file.read().splitlines()
@@ -151,16 +152,3 @@ def load_pin_as_nn(file_name):
     cam[1][3][3] = np.float64(d_max)
 
     return cam
-
-# func test
-# load_pfm("./test_file/test.pfm")
-
-# depth_map = np.random.rand(480, 640).astype(np.float32)
-# save_pfm("./test_file/save_pfm.pfm", depth_map)
-# load_pfm("./test_file/save_pfm.pfm")
-
-# load_rpc_as_array("./test_file/test.rpc")
-
-# read_camera("./test_file/camera.txt")
-
-

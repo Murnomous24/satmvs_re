@@ -10,6 +10,7 @@
 - 26/1/14: finish `predict.py`
 
 # TODO
-- [] 排查 completeness 异常的问题
+- [x] 排查 completeness 异常的问题 -> Completeness 计算方式不正确，先排除
 - [] 进行训练性能、速度排查和修正
+- [] 输出 geotif 格式的结果，将深度图恢复为 point cloud
 - [] 加入 feature volume 的融合机制

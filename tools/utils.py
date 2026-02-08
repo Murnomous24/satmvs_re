@@ -1,7 +1,10 @@
+import json
+import os
 import torch
 import numpy as np
 import torchvision.utils as vutils
 import cv2
+from osgeo import gdal
 
 # torch.no_grad warpper for functions
 def make_nograd_func(func): # TODO what means
@@ -191,3 +194,73 @@ def unnormalize_image(img_tensor):
     img_min, img_max = img.min(), img.max()
     img = (img - img_min) / (img_max - img_min + 1e-6)
     return (img * 255).astype(np.uint8)
+
+def read_config(config_file):
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    return config
+
+def mkdir_if_not_exist(folder_path):
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+def read_from_txt(txt_file):
+    with open(txt_file, "r") as f:
+        text = f.read().splitlines()
+    
+    num = int(text[0])
+    content = text[1:]
+    if num != len(content):
+        raise ValueError(f"read_from_txt: read {txt_file}, should get {num} lines, but get {len(content)} lines.")
+    
+    res = dict()
+    for line in content:
+        kv = line.split(" ", 1)
+        res[int(kv[0])] = kv[1]
+    
+    return res
+
+def read_pair_from_txt(txt_file):
+    with open(txt_file, "r") as f:
+        text = f.read().splitlines()
+
+    num = int(text[0])
+    content = text[1:]
+    if num != len(content) / 2:
+        raise ValueError(f"read_pair_from_txt: read {txt_file}, should get {num} pair(s), but get {len(content) / 2} pair(s).")
+
+    view_idx_list = []
+    for i in range(num):
+        ref_idx = [content[i * 2]]
+        view_idx_list.append(ref_idx)
+
+        src_content = content[i * 2 + 1].split(" ")
+        src_num = int(src_content[0])
+        if src_num != len(src_content[1:]) / 2:
+            raise ValueError(
+                f"read_pair_from_txt: read {txt_file}, should get {src_num} source view(s), but get {len(src_content[1:]) / 2} source view(s)."
+            )
+
+        for j in range(src_num):
+            src_idx = src_content[j * 2 + 1]
+            view_idx_list.append(src_idx)
+
+    return view_idx_list
+
+def read_np_array_from_txt(txt_file):
+    with open(txt_file, "r") as f:
+        text = f.read().splitlines()
+
+    res = np.array(text, float)
+    return res
+
+def get_image_size(image_path):
+    image = gdal.Open(image_path)
+    if image is None:
+        raise Exception(f"gdal open {image_path} failed")
+    
+    width = image.RasterXSize
+    height = image.RasterYSize
+
+    del image
+    return width, height

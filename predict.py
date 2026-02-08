@@ -5,6 +5,8 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import cv2
+import matplotlib.pyplot as plt
+from dataset.data_io import save_pfm
 
 from tools.utils import *
 from dataset import find_dataset
@@ -70,9 +72,9 @@ pred_dataset = mvsdataset(
 pred_loader = DataLoader(
     pred_dataset,
     args.batch_size,
-    shuffle = True,
+    shuffle = False,
     num_workers = 0,
-    drop_last = True
+    drop_last = False
 )
 
 # mvs model
@@ -126,10 +128,7 @@ def predict_batch(model, sample):
     # wrap outputs
     image_outputs = {
         "depth_est": depth_est,
-        "photometric_confidence": photometric_confidence,
-        "depth_gt": sample["depth"]["stage3"],  # TODO: why stage1
-        "ref_image": sample["images"][:, 0],
-        "mask": sample["mask"]["stage3"]  # TODO: why stage1
+        "photometric_confidence": photometric_confidence
     }
     
     return image_outputs
@@ -147,38 +146,105 @@ def predict():
 
         # modify results's format
         depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
-        depth_gt = np.squeeze(tensor2numpy(image_outputs["depth_gt"]))
         prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))
-        ref_img_raw = image_outputs["ref_image"][0]
-        mask = np.squeeze(tensor2numpy(image_outputs["mask"]))
 
-        # process for results
-        ref_view = unnormalize_image(ref_img_raw)
-        ref_view = cv2.cvtColor(ref_view, cv2.COLOR_RGB2BGR)
+        # save depth and confidence in PFM format
+        depth_dir = os.path.join(pred_log_dir, "depth_est", b_idx)
+        conf_dir = os.path.join(pred_log_dir, "confidence", b_idx)
+        os.makedirs(depth_dir, exist_ok=True)
+        os.makedirs(conf_dir, exist_ok=True)
+        depth_path = os.path.join(depth_dir, f"{b_name}.pfm")
+        conf_path = os.path.join(conf_dir, f"{b_name}.pfm")
+        save_pfm(depth_path, depth_est.astype(np.float32))
+        save_pfm(conf_path, prob.astype(np.float32))
 
-        prob_view = cv2.applyColorMap((prob * 255).astype(np.uint8), cv2.COLORMAP_BONE)
+        print(f'Iter {batch_idx}/{len(pred_loader)}, Saved: {depth_path} , {conf_path}, time = {time.perf_counter() - start_time:.3f}s')
 
-        valid_pixels = depth_est[mask > 0.5]
-        if valid_pixels.size > 0:
-            d_min, d_max = np.percentile(valid_pixels, 2), np.percentile(valid_pixels, 98)
-        else:
-            d_min, d_max = 0, 1
-        est_view = visualize_depth(depth_est, mask, min_val=d_min, max_val=d_max)
-        gt_view = visualize_depth(depth_gt, mask, min_val=d_min, max_val=d_max)
+def predict(
+        output_path,
+        depth_range,
+        view_num,
+        cfg,
+        geo_model = "rpc" # for dsm output, default 'rpc'
+):
+    # dataset and dataloader
+    mvsdataset = find_dataset(geo_model)
+    pred_dataset = mvsdataset(
+        output_path,
+        "pred",
+        view_num,
+        depth_range,
+        cfg
+    )
+    pred_loader = DataLoader(
+        pred_dataset,
+        cfg.batch_size,
+        shuffle = False,
+        num_workers = 0,
+        drop_last = False
+    )
+    
+    # model
+    model = None
+    if cfg.model == "casmvs":
+        model = CascadeMVSNet(
+            geo_model = cfg.geo_model,
+            refine = False,
+            min_interval = depth_range[2], # TODO: too hard-code..
+            ndepths = [int(depth) for depth in cfg.ndepths.split(",") if depth],
+            depth_intervals_ratio = [float(interval) for interval in cfg.depth_inter_ratio.split(",") if interval],
+            cr_base_chs = [int(ch) for ch in cfg.cr_base_chs.split(",") if ch]
+        )
+        print(f"use CascadeMVSNet model")
+    else:
+        raise Exception(f"{args.model} has no implementation")
+    
+    model = nn.DataParallel(model)
+    model.cuda()
 
-        # build final output
-        top_row = np.hstack([ref_view, prob_view])
-        bottom_row = np.hstack([est_view, gt_view])
-        combined_view = np.vstack([top_row, bottom_row])
+    # load checkpoint
+    loadckpt = cfg.loadckpt
+    if os.path.isdir(loadckpt):
+        saved_models = [file for file in os.listdir(loadckpt) if file.endswith(".ckpt")]
+        saved_models = sorted(saved_models, key=lambda x: int(x.split('_')[1].split(".")[0]))
+        loadckpt = os.path.join(loadckpt, saved_models[-1])
+    state_dict = torch.load(loadckpt)
+    model.load_state_dict(state_dict=['model'])
 
-        # save results
-        target_dir = os.path.join(pred_log_dir, b_idx)
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-        save_path = os.path.join(target_dir, f"{b_name}.png")
-        cv2.imwrite(save_path, combined_view)
+    # create folder
+    output_folder = os.path.join(output_path, 'mvs')
+    mkdir_if_not_exist(output_folder)
 
-        print(f'Iter {batch_idx}/{len(pred_loader)}, Saved to {save_path}, time = {time.perf_counter() - start_time:.3f}s')
+    # model inference
+    for batch_idx, sample in enumerate(pred_loader):
+        b_idx = str(sample['view_idx'][0])
+        b_name = str(sample['view_name'][0])
+
+        # build result
+        image_outputs = predict_batch(model, sample)
+        depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
+        prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))
+
+        # create sub-folder
+        output_folder_view = output_folder + f"{b_idx}"
+        output_folder_view_depth_map = output_folder_view + f"depth"
+        output_folder_view_depth_map_color = output_folder_view + f"depth/color"
+        output_folder_view_prob = output_folder_view + f"prob"
+        output_folder_view_prob_color = output_folder_view + f"prob/color"
+        mkdir_if_not_exist(output_folder_view)
+        mkdir_if_not_exist(output_folder_view_depth_map)
+        mkdir_if_not_exist(output_folder_view_depth_map_color)
+        mkdir_if_not_exist(output_folder_view_prob)
+        mkdir_if_not_exist(output_folder_view_prob_color)
+
+        # save result
+        save_pfm(output_folder_view_depth_map, depth_est)
+        plt.imsave(output_folder_view_depth_map_color + f"{b_name}.png", depth_est, format='png')
+        save_pfm(output_folder_view_prob, prob)
+        plt.imsave(output_folder_view_prob_color + f"{b_name}.png", prob, format='png')
+
+        del image_outputs
+
 
 if __name__ == '__main__':
     predict()

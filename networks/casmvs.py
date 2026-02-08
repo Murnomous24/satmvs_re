@@ -81,6 +81,7 @@ class DepthNet(nn.Module):
                 padding = 0
             ).squeeze(1) # [B, Ndepth, H, W]
             depth_index = depth_regression(prob_volume, depth_values = torch.arange(num_depth, device = prob_volume.device, dtype = torch.float)).long() # [B, H, W] get the most probably depth index pixel by pixel
+            depth_index = depth_index.clamp(min=0, max=num_depth-1) # fliter illegal index
             photometric_confidence = torch.gather(prob_volume_sum4, 1, depth_index.unsqueeze(1)).squeeze(1) # [B, H, W] get the probability from the most probably depth index
         
         # refine TODO

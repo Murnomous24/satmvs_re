@@ -3,3 +3,6 @@ __pycache__/
 data/
 checkpoints/
 .venv/
+dsm_config/
+dsm_infos/
+tmp_workspace/

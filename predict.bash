@@ -8,7 +8,7 @@ GEO_MODEL="rpc"
 GPU_ID="0"
 BATCH_SIZE=1
 MIN_INTERVAL=0.5
-LOADCKPT="/home/murph_dl/Paper_Re/SatMVS_Re/checkpoints/casmvs/rpc/20260114_145453/model_000276.ckpt"
+LOADCKPT="/home/murph_dl/Paper_Re/train_log/26_1_31_23_42/model_000005.ckpt"
 
 echo "Starting SatMVS predicting: Model=$MODEL, Geo=$GEO_MODEL, GSD=$MIN_INTERVAL"
 
