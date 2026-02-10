@@ -238,6 +238,7 @@ def predict(
         mkdir_if_not_exist(output_folder_view_prob_color)
 
         # save result
+        # TODO: save_pfm argument error
         save_pfm(output_folder_view_depth_map, depth_est)
         plt.imsave(output_folder_view_depth_map_color + f"{b_name}.png", depth_est, format='png')
         save_pfm(output_folder_view_prob, prob)
