@@ -1,16 +1,7 @@
-# blog
-- 26/1/4: part of `data_io.py`, including pfm r/w and rpc read
-- 26/1/5: finish `data_io.py`, start gen_list and dataset class
-- 26/1/6: finish `dataset_pinhole.py`, `dataset_rpc.py`, `gen_list.py`, `preprocess.py`, test dataset class
-- 26/1/7: finish `warping.py`
-- 26/1/9: part of `modules/` and `networks/`, mainly focus on DepthNet
-- 26/1/10: basic `modules/` and finish `networks/casmvs.py`, test network on pinhole/rpc
-- 26/1/12: part of `train.py`
-- 26/1/13: fix some error, overfitting training on small sample
-- 26/1/14: finish `predict.py`
-
 # TODO
 - [x] 排查 completeness 异常的问题 -> Completeness 计算方式不正确，先排除
+- [x] 输出 geotif 格式的结果，将深度图恢复为 point cloud -> 参考 [Official implementation of Sat-MVSF](https://gpcv.whu.edu.cn/data/3d/mvs.html) 恢复出了基本结果
 - [] 进行训练性能、速度排查和修正
-- [x] 输出 geotif 格式的结果，将深度图恢复为 point cloud
+    - Train 阶段 GPU 显存占用率变化大
+    - Predict DSM 阶段模型 inference 缓慢
 - [] 加入 feature volume 的融合机制
