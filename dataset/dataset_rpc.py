@@ -11,7 +11,8 @@ class MVSDataset(Dataset):
             data_path,
             mode,
             view_num,
-            ref_view = 2):
+            ref_view = 2,
+            depth_range = None):
         super(MVSDataset, self).__init__()
 
         self.data_path = data_path
@@ -19,8 +20,18 @@ class MVSDataset(Dataset):
         assert self.mode in ["train", "test", "valid", "pred"]
         self.view_num = view_num
         self.ref_view = ref_view
+        self.depth_range = depth_range
         self.sample_list = self.build_list()
         self.sample_num = len(self.sample_list)
+
+    def get_depth_range(self, default_min, default_max):
+        if self.depth_range is not None and len(self.depth_range) >= 2:
+            range_min = float(self.depth_range[0])
+            range_max = float(self.depth_range[1])
+            if range_min < range_max:
+                return range_min, range_max
+
+        return float(default_min), float(default_max)
     
     # build sample(image, parameter, depth)
     def build_list(self):
@@ -70,6 +81,7 @@ class MVSDataset(Dataset):
         centered_images = np.stack(centered_images).transpose([0, 3, 1, 2]) # assume [view_num, H, W, C] -> [view_num, C, H, W](opencv -> pytorch)
 
         # height range
+        height_min, height_max = self.get_depth_range(height_min, height_max)
         height_values = np.array([height_min, height_max], dtype=np.float32)
 
         # multi stage height map
@@ -151,6 +163,7 @@ class MVSDataset(Dataset):
         centered_images = np.stack(centered_images).transpose([0, 3, 1, 2]) # assume [view_num, H, W, C] -> [view_num, C, H, W](opencv -> pytorch)
 
         # height range
+        height_min, height_max = self.get_depth_range(height_min, height_max)
         height_values = np.array([height_min, height_max], dtype=np.float32)
 
         # multi stage rpc para
@@ -190,51 +203,3 @@ class MVSDataset(Dataset):
             return self.get_sample(index)
         else:
             return self.get_pred_sample(index)
-        
-# test code
-# if __name__ == "__main__":
-#     import torch
-#     from torch.utils.data import DataLoader
-
-#     DATA_PATH = "/home/murph_dl/Paper_Re/SatMVS_Re/test_file/test_dataset_rpc"
-#     MODE = "train"
-#     VIEW_NUM = 3
-#     REF_VIEW = 0
-
-#     try:
-#         dataset = MVSDataset(
-#             data_path = DATA_PATH,
-#             mode = MODE,
-#             view_num = VIEW_NUM,
-#             ref_view = REF_VIEW
-#         )
-#         print(f"1: load dataset ok, length: {len(dataset)}")
-
-#         data_loader = DataLoader(dataset, batch_size = 1, shuffle = False)
-
-#         print("2: load data from dataloader")
-#         for idx, sample in enumerate(data_loader):
-#             print(f"2.1: sample index: {idx}")
-
-#             print(f"2.2: image shape [B, V, C, H, W]: {sample['images'].shape}")
-
-#             print(f"2.3: depth range (min, max): {sample['depth_values'][0].numpy()}")
-
-#             print(f"2.4 rpc")
-#             for stage in sample['cameras_para']:
-#                 print(f"  - {stage} RPC shape: {sample['cameras_para'][stage].shape}")
-
-#             if dataset.mode != "pred":
-#                 for stage in sample['depth']:
-#                     print(f"  - depth {stage}: {sample['depth'][stage].shape}")
-
-#                 for stage in sample['mask']:
-#                     print(f"  - mask {stage}: {sample['mask'][stage].shape}")
-            
-#             print(f"2.5: ref index: {sample['view_idx']}")
-#             print(f"2.6: file name: {sample['view_name']}")
-
-#             break
-
-#     except Exception as e:
-#         print(f"test failed: {e}")

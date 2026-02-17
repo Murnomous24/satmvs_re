@@ -1,6 +1,7 @@
 import numpy as np
 import os
 
+# rpc model for dsm prediction(no inverse rpc provide)
 class RPCModel:
     def __init__(self, data = np.zeros(170, dtype = np.float64)):
         self.LINE_OFF = data[0]
@@ -129,31 +130,31 @@ class RPCModel:
         A = np.zeros((sample_num * 2, 78))
         # Lat part
         A[0: sample_num, 0:20] = - coef
-        A[0: sample_num, 20:39] = samp.reshape(-1, 1) * coef[:, 1:]
+        A[0: sample_num, 20:39] = lat.reshape(-1, 1) * coef[:, 1:]
         # Lon part
         A[sample_num:, 39:59] = - coef
-        A[sample_num:, 59:78] = line.reshape(-1, 1) * coef[:, 1:]
+        A[sample_num:, 59:78] = lon.reshape(-1, 1) * coef[:, 1:]
 
         # build l
-        l = np.concatenate((samp, line), -1)
+        l = np.concatenate((lat, lon), -1)
         l = -l
 
         # solve Ax = l
         x, res, rank, sv = np.linalg.lstsq(A, l, rcond = None) # TODO: solving setting
 
         # inverse member
-        self.SNUM = x[0:20]
-        self.SDEM[0] = 1.0
-        self.SDEM[1:20] = x[20:39]
-        self.LNUM = x[39:59]
-        self.LDEM[0] = 1.0
-        self.LDEM[1:20] = x[59:]
+        self.LATNUM = x[0:20]
+        self.LATDEM[0] = 1.0
+        self.LATDEM[1:20] = x[20:39]
+        self.LONNUM = x[39:59]
+        self.LONDEM[0] = 1.0
+        self.LONDEM[1:20] = x[59:]
     
     def coef_calculate(self, P, L, H):
         sample_num = P.shape[0]
         coef = np.zeros((sample_num, 20))
 
-        coef[:, 0] = 1.0 # TODO: check necessity
+        coef[:, 0] = 1.0
         coef[:, 1] = L
         coef[:, 2] = P
         coef[:, 3] = H
@@ -178,6 +179,7 @@ class RPCModel:
 
         return coef
     
+    # TODO: check for inverse parameter acc
     def check(
         self,
         width,
@@ -185,7 +187,7 @@ class RPCModel:
         xy_sample_num,
         z_sample_num
     ):
-        height_max, height_min = self.get_height_max_min()
+        height_min, height_max = self.get_height_min_max()
 
         # build grid
         x = np.linspace(0, width, xy_sample_num)
@@ -206,11 +208,11 @@ class RPCModel:
         reproj_error_x = np.sqrt(error_x)
         reproj_error_y = np.sqrt(error_y)
         
-    def get_height_max_min(self):
+    def get_height_min_max(self):
         height_max = self.HEIGHT_OFF + self.HEIGHT_SCALE
         height_min = self.HEIGHT_OFF - self.HEIGHT_SCALE
 
-        return height_max, height_min
+        return height_min, height_max
     
     def obj2photo(self, inlat, inlon, inhei):
         lat = np.copy(inlat)
@@ -231,8 +233,12 @@ class RPCModel:
         
         # projection
         coef = self.coef_calculate(lat, lon, hei)
-        samp = np.sum(coef * self.SNUM, axis = -1) / np.sum(coef * self.SDEM, axis = -1)
-        line = np.sum(coef * self.LNUM, axis = -1) / np.sum(coef * self.LDEM, axis = -1)
+        denom_samp = np.sum(coef * self.SDEM, axis = -1)
+        denom_line = np.sum(coef * self.LDEM, axis = -1)
+        denom_samp = np.where(np.abs(denom_samp) < 1e-8, 1e-8, denom_samp)
+        denom_line = np.where(np.abs(denom_line) < 1e-8, 1e-8, denom_line)
+        samp = np.sum(coef * self.SNUM, axis = -1) / denom_samp
+        line = np.sum(coef * self.LNUM, axis = -1) / denom_line
 
         # from noramlization to pixel
         samp *= self.SAMP_SCALE
@@ -262,8 +268,12 @@ class RPCModel:
         
         # projection
         coef = self.coef_calculate(samp, line, hei)
-        lat = np.sum(coef * self.LATNUM, axis = -1) / np.sum(coef * self.LATDEM, axis = -1)
-        lon = np.sum(coef * self.LONNUM, axis = -1) / np.sum(coef * self.LONDEM, axis = -1)
+        denom_lat = np.sum(coef * self.LATDEM, axis = -1)
+        denom_lon = np.sum(coef * self.LONDEM, axis = -1)
+        denom_lat = np.where(np.abs(denom_lat) < 1e-8, 1e-8, denom_lat)
+        denom_lon = np.where(np.abs(denom_lon) < 1e-8, 1e-8, denom_lon)
+        lat = np.sum(coef * self.LATNUM, axis = -1) / denom_lat
+        lon = np.sum(coef * self.LONNUM, axis = -1) / denom_lon
 
         # from noramlization to pixel
         lat *= self.LAT_SCALE

@@ -1,11 +1,12 @@
 import copy
 import os
 import numpy as np
+from tqdm import tqdm
 from predict import predict
 from tools.utils import get_image_size, read_image, save_image, save_rpc, write_point_cloud, filter_depth, raster_create, read_point_cloud, build_dsm, write_dsm
 from dataset.rpc_model import RPCModel
 from dataset.data_io import load_pfm, load_rpc_as_array
-from tools.utils_utm_projection import Projection
+from tools.utm_projection import Projection
 
 class Pipeline:
     def __init__(
@@ -33,12 +34,14 @@ class Pipeline:
         self.x_overlap = 1 - config["overlap_x"] # neighbor block overlap
         self.y_overlap = 1 - config["overlap_y"]
         self.para = config["para"] # block size adjust
-        self.invalid = config["invalid_value"] # TODO: whatt
+        self.invalid = config["invalid_value"] # dsm invalid pixel's value
+        self.block_x_size = self.config_block_x_size
+        self.block_y_size = self.config_block_y_size
 
-        # TODO: what
-        self.p_thred = config["position_threshold"] # TODO: whatt
-        self.d_thred = config["depth_threshold"] # TODO: whatt
-        self.geo_num = config["geometric_num"] # TODO: whatt
+        # dsm check threshold
+        self.p_thred = config["position_threshold"] # reproject pixel's position error threshold
+        self.d_thred = config["depth_threshold"] # reproject pixel's depth error threshold
+        self.geo_num = config["geometric_num"] # geo mask threshold
 
         # data
         self.image_path = image_path
@@ -51,14 +54,14 @@ class Pipeline:
         self.rpcs = []
         idx = 0
         for path in self.rpc_path:
-            rpc = RPCModel() # TODO: rpc class implement
+            rpc = RPCModel()
             rpc.load_rpc_from_file(path)
             rpc.check(self.image_size[idx][0], self.image_size[idx][1], 100, 30) # TODO: ?
             self.rpcs.append(copy.deepcopy(rpc))
             idx += 1
 
             if depth_range[0] == 0 and depth_range[1] == 0 and idx == 1: # get depth range from rpc
-                depth_range[0], depth_range[1] = rpc.get_height_max_min()
+                depth_range[0], depth_range[1] = rpc.get_height_min_max()
 
         # projection
         self.projection = Projection(project_str)
@@ -72,7 +75,7 @@ class Pipeline:
         # block config
         # no blocking
         if self.config_block_x_size >= self.dsm_x_size or self.config_block_y_size >= self.dsm_y_size:
-            self.jump_crop = [1]
+            self.jump_crop = np.ones(1, dtype=int)
 
             self.block_x_size, self.block_y_size = self.image_size[0][0], self.image_size[0][1]
             self.block_x_center = np.array([[int(self.block_x_size / 2)] for idx in range(self.view_num)], int) 
@@ -84,28 +87,29 @@ class Pipeline:
             self.x_dsm_start = [self.x_grid_start * self.x_unit + self.border[0]]
             self.y_dsm_start = [self.y_grid_start * self.y_unit + self.border[1]]
             self.x_dsm_end = [self.dsm_x_size * self.x_unit + self.border[0]]
-            self.y_dsm_end = [-self.dsm_y_size * self.y_unit + self.border[1]] # why minus?
+            self.y_dsm_end = [-self.dsm_y_size * self.y_unit + self.border[1]] # negative
 
             self.block_num = 1
-            # TODO change config_block_size ?
+            self.block_x_size = self.dsm_x_size
+            self.block_y_size = self.dsm_y_size
         # block
         else:
-             self.jump_crop = np.ones(1)
-             self.block_x_center = np.zeros(1)
-             self.block_y_center = np.zeros(1) 
+            self.jump_crop = np.ones(1, dtype=int)
+            self.block_x_center = np.zeros(1)
+            self.block_y_center = np.zeros(1)
 
-             self.x_grid_start = np.zeros(1) 
-             self.y_grid_start = np.zeros(1)
+            self.x_grid_start = np.zeros(1)
+            self.y_grid_start = np.zeros(1)
 
-             self.x_dsm_start = np.zeros(1)
-             self.y_dsm_start = np.zeros(1)
-             self.x_dsm_end = np.zeros(1)
-             self.y_dsm_end = np.zeros(1)
+            self.x_dsm_start = np.zeros(1)
+            self.y_dsm_start = np.zeros(1)
+            self.x_dsm_end = np.zeros(1)
+            self.y_dsm_end = np.zeros(1)
 
-             self.block_num = 0
+            self.block_num = 0
 
-             # calculate these properties
-             self.calculate_block_properties()
+            # calculate these properties
+            self.calculate_block_properties()
 
         # output path
         self.output_path = output_path
@@ -122,8 +126,8 @@ class Pipeline:
 
     # blocking properties calculation
     def calculate_block_properties(self):
-        block_num_x = self.dsm_x_size / (self.block_x_size)
-        block_num_y = self.dsm_y_size / (self.block_y_size)
+        block_num_x = self.dsm_x_size / (self.block_x_size * self.x_overlap)
+        block_num_y = self.dsm_y_size / (self.block_y_size * self.y_overlap)
 
         # block number adjust
         if abs(block_num_x - int(block_num_x)) < 0.0001:
@@ -136,19 +140,19 @@ class Pipeline:
             block_num_y = int(block_num_y + 1)
 
         # build grid start and end(NOTE: all of them are array!)
-        self.x_grid_start = (np.arange(block_num_x) * block_x_size * x_overlap).astype(int)
-        x_grid_end = self.x_grid_start + block_x_size
-        self.y_grid_start = (np.arange(block_num_y) * block_y_size * y_overlap).astype(int)
-        y_grid_end = self.y_grid_start + block_y_size
+        self.x_grid_start = (np.arange(block_num_x) * self.block_x_size * self.x_overlap).astype(int)
+        x_grid_end = self.x_grid_start + self.block_x_size
+        self.y_grid_start = (np.arange(block_num_y) * self.block_y_size * self.y_overlap).astype(int)
+        y_grid_end = self.y_grid_start + self.block_y_size
 
         # adjust grid avoid exceed border limit
         x_over_index = x_grid_end > self.dsm_x_size
-        self.x_grid_start[x_over_index] = self.dsm_x_size - block_x_size
-        x_grid_end = self.x_grid_start + block_x_size
+        self.x_grid_start[x_over_index] = self.dsm_x_size - self.block_x_size
+        x_grid_end = self.x_grid_start + self.block_x_size
 
         y_over_index = y_grid_end > self.dsm_y_size
-        self.y_grid_start[y_over_index] = self.dsm_y_size - block_y_size
-        y_grid_end = self.y_grid_start + block_y_size
+        self.y_grid_start[y_over_index] = self.dsm_y_size - self.block_y_size
+        y_grid_end = self.y_grid_start + self.block_y_size
 
         # build meshgrid, shape like [block_num_x, block_num_y]
         self.x_grid_start, self.y_grid_start = np.meshgrid(self.x_grid_start, self.y_grid_start) 
@@ -241,15 +245,18 @@ class Pipeline:
         self.block_y_center = self.block_y_center.astype(int)
 
         # block size & block range adjust
-        block_x_size = np.max(block_x_size) # TODO, here?
-        block_y_size = np.max(block_y_size)
-        block_num = block_x_size.shape[0]
+        self.block_x_size = int(np.max(block_x_size_list))
+        self.block_y_size = int(np.max(block_y_size_list))
+        self.block_num = self.x_grid_start.shape[0]
 
         self.block_adjust()
     
     # block adjustment(avoiding out of bound)
-    # TODO: modify!!!!
     def block_adjust(self):
+        # overflow distance
+        overflow_x_size = self.block_x_size * self.x_overlap
+        overflow_y_size = self.block_y_size * self.y_overlap
+
         # block rects
         self.block_x_start = (self.block_x_center - self.block_x_size / 2).astype(int)
         self.block_y_start = (self.block_y_center - self.block_y_size / 2).astype(int)
@@ -262,27 +269,27 @@ class Pipeline:
 
             # start (remove condition)
             # upper-left out range
-            x_start_remove_0 = (self.block_x_start[idx] <= -self.x_overlap_size * block_x_size)
-            y_start_remove_0 = self.block_y_start[idx] <= -self.y_overlap_size * block_y_size
+            x_start_remove_0 = self.block_x_start[idx] <= -overflow_x_size
+            y_start_remove_0 = self.block_y_start[idx] <= -overflow_y_size
             # bottom-right out range
-            x_start_remove_1 = self.block_x_start[idx] >= self.image_sizes[idx][0] - 1
-            y_start_remove_1 = self.block_y_start[idx] >= self.image_sizes[idx][1] - 1
+            x_start_remove_1 = self.block_x_start[idx] > self.image_size[idx][0] - 1
+            y_start_remove_1 = self.block_y_start[idx] > self.image_size[idx][1] - 1
 
             # end (remove condtion)
             # upper-left out range
             x_end_remove_0 = self.block_x_end[idx] < 0
             y_end_remove_0 = self.block_y_end[idx] < 0
             # bottom-right out range
-            x_end_remove_1 = self.block_x_end[idx] >= self.image_sizes[idx][0] - 1 + self.x_overlap_size * self.block_x_size
-            y_end_remove_1 = self.block_y_end[idx] >= self.image_sizes[idx][1] - 1 + self.y_overlap_size * self.block_y_size
+            x_end_remove_1 = self.block_x_end[idx] >= self.image_size[idx][0] - 1 + overflow_x_size
+            y_end_remove_1 = self.block_y_end[idx] >= self.image_size[idx][1] - 1 + overflow_y_size
 
             # start (adjust)
             # upper-left
-            x_start_adjust_0 = (self.block_x_start[idx] < 0) & (self.block_x_start[idx] > -self.x_overlap_size * self.block_x_size)
-            y_start_adjust_0 = (self.block_y_start[idx] < 0) & (self.block_y_start[idx] > -self.y_overlap_size * self.block_y_size)
+            x_start_adjust_0 = (self.block_x_start[idx] < 0) & (self.block_x_start[idx] > -overflow_x_size)
+            y_start_adjust_0 = (self.block_y_start[idx] < 0) & (self.block_y_start[idx] > -overflow_y_size)
             # bottom-right
-            x_end_adjust_0 = (self.block_x_end[idx] > self.image_sizes[idx][0] - 1) & (self.block_x_end[idx] < self.image_sizes[idx][0] - 1 + self.x_overlap_size * self.block_x_size)
-            y_end_adjust_0 = (self.block_y_end[idx] > self.image_sizes[idx][1] - 1) & (self.block_y_end[idx] < self.image_sizes[idx][1] - 1 + self.y_overlap_size * self.block_y_size)
+            x_end_adjust_0 = (self.block_x_end[idx] > self.image_size[idx][0] - 1) & (self.block_x_end[idx] < self.image_size[idx][0] - 1 + overflow_x_size)
+            y_end_adjust_0 = (self.block_y_end[idx] > self.image_size[idx][1] - 1) & (self.block_y_end[idx] < self.image_size[idx][1] - 1 + overflow_y_size)
 
             # jump flag (remove part)
             jump[x_start_remove_0] = 0
@@ -300,10 +307,10 @@ class Pipeline:
             self.block_x_end[idx][x_start_adjust_0] = self.block_x_size
             self.block_y_end[idx][y_start_adjust_0] = self.block_y_size
 
-            self.block_x_start[idx][x_end_adjust_0] = self.image_sizes[idx][0] - 1 - self.block_x_size
-            self.block_y_start[idx][y_end_adjust_0] = self.image_sizes[idx][1] - 1 - self.block_y_size
-            self.block_x_end[idx][x_end_adjust_0] = self.image_sizes[idx][0] - 1
-            self.block_y_end[idx][y_end_adjust_0] = self.image_sizes[idx][0] - 1
+            self.block_x_start[idx][x_end_adjust_0] = self.image_size[idx][0] - 1 - self.block_x_size
+            self.block_y_start[idx][y_end_adjust_0] = self.image_size[idx][1] - 1 - self.block_y_size
+            self.block_x_end[idx][x_end_adjust_0] = self.image_size[idx][0] - 1
+            self.block_y_end[idx][y_end_adjust_0] = self.image_size[idx][1] - 1
 
             self.block_x_center = (self.block_x_start + self.block_x_end) / 2
             self.block_y_center = (self.block_y_start + self.block_y_end) / 2
@@ -314,63 +321,53 @@ class Pipeline:
     
     # crop fullsize image into pieces
     def crop_image(self, block_idx):
-        if self.jump_crop[block_idx]:
+        if self.jump_crop[block_idx] == 0:
             return
     
         for view_idx in range(self.view_num):
             # read image block
             block_x_start = self.block_x_center[view_idx][block_idx] - int(self.block_x_size / 2)
             block_y_start = self.block_y_center[view_idx][block_idx] - int(self.block_y_size / 2)
-            image = read_image( # TODO: read block from fullsize image
+            image = read_image(
                 self.image_path[view_idx],
                 int(block_x_start),
                 int(block_y_start),
                 int(self.block_x_size),
                 int(self.block_y_size)
-            ) # TODO: shape?
+            )
             image = image.transpose([1, 2, 0])
 
             # read rpc
             full_rpc = self.rpcs[view_idx]
             block_rpc = copy.deepcopy(full_rpc)
-            block_rpc.SAMP_OFF -= int(block_x_start) # TODO: rpc offset
+            # new rpc calculate
+            block_rpc.SAMP_OFF -= int(block_x_start)
             block_rpc.LINE_OFF -= int(block_y_start)
 
             # save image, rpc
             out_name = "block{:0>4d}".format(block_idx)
             image_out_path = os.path.join(self.output_image_paths[view_idx], f"{out_name}.png")
             rpc_out_path = os.path.join(self.output_rpc_paths[view_idx], f"{out_name}.rpc")
-            save_image(image_out_path, image) # TODO: save block from fullsize image
-            save_rpc(rpc_out_path, block_rpc) # TODO: save rpc information
+            save_image(image_out_path, image)
+            save_rpc(rpc_out_path, block_rpc)
 
     def create_output_folder(self):
-        if not os.path.exists(self.output_path):
-            os.mkdir(self.output_path)
+        os.makedirs(self.output_path, exist_ok=True)
 
-        if not os.path.exists(self.output_image_path):
-            os.mkdir(self.output_image_path)
-        if not os.path.exists(self.output_rpc_path):
-            os.mkdir(self.output_rpc_path)
-        if not os.path.exists(self.output_height_path):
-            os.mkdir(self.output_height_path)
-        if not os.path.exists(self.output_points_path):
-            os.mkdir(self.output_points_path)
-        if not os.path.exists(self.output_dsm_path):
-            os.mkdir(self.output_dsm_path)
+        os.makedirs(self.output_image_path, exist_ok=True)
+        os.makedirs(self.output_rpc_path, exist_ok=True)
+        os.makedirs(self.output_height_path, exist_ok=True)
+        os.makedirs(self.output_points_path, exist_ok=True)
+        os.makedirs(self.output_dsm_path, exist_ok=True)
 
         for v in range(self.view_num):
-            if not os.path.exists(self.output_image_paths[v]):
-                os.mkdir(self.output_image_paths[v])
-
-            if not os.path.exists(self.output_rpc_paths[v]):
-                os.mkdir(self.output_rpc_paths[v])
-
-            if not os.path.exists(self.output_height_paths[v]):
-                os.mkdir(self.output_height_paths[v])
+            os.makedirs(self.output_image_paths[v], exist_ok=True)
+            os.makedirs(self.output_rpc_paths[v], exist_ok=True)
+            os.makedirs(self.output_height_paths[v], exist_ok=True)
     
     def generate_points(self, block_idx):
         if self.jump_crop[block_idx] == 0:
-            return
+            return np.empty((0, 3), dtype=np.float32)
         
         # output folder & file
         out_name = "block{:0>4d}".format(block_idx)
@@ -381,8 +378,8 @@ class Pipeline:
         heights = []
         rpcs = []
 
-        for idx in self.view_num:
-            height_map_path = os.path.join(self.output_height_paths[idx], f"{out_name}.pfm") # TODO
+        for idx in range(self.view_num):
+            height_map_path = os.path.join(self.output_height_paths[idx], f"{out_name}.pfm")
             height_map = load_pfm(height_map_path)
             heights.append(height_map)
 
@@ -392,7 +389,9 @@ class Pipeline:
         
         heights = np.stack(heights, axis = 0)
         rpcs = np.stack(rpcs, axis = 0)
-        mask, heights_est = filter_depth(heights, rpcs, p_ratio = self.p_thred, d_ratio = self.d_thred, geo_consitency_thre = self.geo_num, prob = None, cofidence_ratio = 0.2) # TODO, check arguments
+
+        # filter depth map by project and back-project
+        mask, heights_est = filter_depth(heights, rpcs, p_ratio = self.p_thred, d_ratio = self.d_thred, geo_consitency_thre = self.geo_num, prob = None, cofidence_ratio = 0.2)
 
         heights_est = heights_est.reshape(-1)
         mask = mask.reshape(-1)
@@ -420,18 +419,23 @@ class Pipeline:
         if os.path.exists(dsm_path):
             os.remove(dsm_path)
 
+        # [upper-left x coord, pixel's width, x's rot, upper-left y coord, y's rot, pixel's height]
         geo_trans = [
             self.border[0] - float(self.x_unit) / 2, self.x_unit, 0,
             self.border[1] - float(self.y_unit) / 2, 0, -self.y_unit,
-        ] # TODO: what
+        ] # GDAL format, for pixel and geo coordinate's affine transform
         raster_create(
             dsm_path, int(self.dsm_x_size), int(self.dsm_y_size),
             1, self.projection.spatial_reference.ExportToWkt(), geo_trans,
             self.invalid, dtype = "Float32"
-        )
+        ) # input image's size, projection function and nan' number
 
         points_path = os.path.join(self.output_points_path, "points.las")
+        if not os.path.exists(points_path):
+            return
         points = read_point_cloud(points_path)
+        if points.size == 0:
+            return
         
         dsm = build_dsm(
             points, self.border[0], self.border[1],
@@ -446,7 +450,7 @@ class Pipeline:
         
         # crop fullsize image to model input size
         if self.run_crop_img:
-            for idx in range(self.block_num):
+            for idx in tqdm(range(self.block_num), desc="Crop Image", unit="block"):
                 self.crop_image(idx)
         
         # mvs pipeline, get the height map
@@ -461,13 +465,15 @@ class Pipeline:
         # build point cloud output
         if self.run_generate_points:
             points = []
-            for idx in range(self.block_num):
+            for idx in tqdm(range(self.block_num), desc="Generate Points", unit="block"):
                 point = self.generate_points(idx) # TODO: generate point clouds from depth map
-                points.append(point)
+                if point.size > 0:
+                    points.append(point)
 
-            points = np.concatenate(points, axis = 0)
-            points_output_path = os.path.join(self.output_points_path, "points.las")
-            write_point_cloud(points_output_path, points)
+            if points:
+                points = np.concatenate(points, axis = 0)
+                points_output_path = os.path.join(self.output_points_path, "points.las")
+                write_point_cloud(points_output_path, points)
 
         # build dsm output
         if self.run_generate_dsm:

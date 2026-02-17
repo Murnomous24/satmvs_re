@@ -1,8 +1,7 @@
-test_file/
 __pycache__/
+.venv/
+
 data/
 checkpoints/
-.venv/
-dsm_config/
-dsm_infos/
-tmp_workspace/
+
+dsm_results/

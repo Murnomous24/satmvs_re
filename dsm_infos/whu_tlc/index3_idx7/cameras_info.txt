@@ -1,0 +1,4 @@
+3
+0 ./data/Open/test/index3_idx7/Image/0000.rpc
+1 ./data/Open/test/index3_idx7/Image/0001.rpc
+2 ./data/Open/test/index3_idx7/Image/0002.rpc

@@ -11,8 +11,8 @@ parser.add_argument("--info_root", default="dsm_infos/whu_tlc")
 
 # model
 parser.add_argument('--model', default = 'casmvs', help = 'select model', choices = ['casmvs'])
-parser.add_argument('--geo_model', default = 'pinhole', help = 'select dataset format', choices = ['pinhole', 'rpc'])
-parser.add_argument('--loadckpt', default = None, help = 'specific checkpoint file for prediction')
+parser.add_argument('--geo_model', default = 'rpc', help = 'select dataset format', choices = ['pinhole', 'rpc'])
+parser.add_argument('--loadckpt', default = '/home/murph_dl/Paper_Re/train_log/26_1_31_23_42/model_000005.ckpt', help = 'specific checkpoint file for prediction')
 
 # load data parameters
 parser.add_argument('--resize_scale', type=float, default=1, help='output scale for depth and image (W and H)')
@@ -32,7 +32,7 @@ parser.add_argument('--cr_base_chs', type=str, default="8,8,8", help='cost regul
 parser.add_argument('--gpu_id', type = str, default = "0")
 
 # output
-parser.add_argument("--workspace", type=str, default="./tmp_workspace")
+parser.add_argument("--workspace", type=str, default="./dsm_results")
 
 # parse arguments and check
 args = parser.parse_args()
@@ -68,11 +68,13 @@ if __name__ == "__main__":
     config = read_config(args.config_file)
     workspace = args.workspace
     mkdir_if_not_exist(workspace)
+    print(f"Workspace: {workspace}")
 
     # per-scene
     scenes = sorted(os.listdir(args.info_root))
     for scene in scenes:
         scene_path = f"{args.info_root}/{scene}"
+        print(f"Scene start: {scene}")
         
         # get file path
         project_info_file = f"{scene_path}/WGS 1984 UTM Zone  8N.prj"
@@ -93,6 +95,7 @@ if __name__ == "__main__":
 
         border = read_border(border_info_file)
         depth_range = read_depth_range(depth_range_file)
+        print(f"Scene metadata loaded: {scene}")
 
         # make output folder
         pair_workspace = f"{workspace}/{scene}"
@@ -108,6 +111,7 @@ if __name__ == "__main__":
 
             output_path = os.path.join(pair_workspace, out_name)
             mkdir_if_not_exist(output_path)
+            print(f"Pair start: {scene}/{out_name}")
 
             # run predict and build dsm output
             dsm_pipeline = Pipeline(
@@ -117,9 +121,12 @@ if __name__ == "__main__":
                 project_str,
                 border,
                 depth_range,
-                out_name,
+                output_path,
                 args
             )
             dsm_pipeline.run()
+            print(f"Pair done: {scene}/{out_name}")
+
+        print(f"Scene done: {scene}")
 
         
