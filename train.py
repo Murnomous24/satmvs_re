@@ -99,14 +99,16 @@ train_loader = DataLoader(
     train_dataset,
     args.batch_size,
     shuffle = True,
-    num_workers = 0,
+    num_workers = 4,
+    pin_memory = True,
     drop_last = True
 )
 test_loader = DataLoader(
     test_dataset,
     args.batch_size,
     shuffle = False,
-    num_workers = 0,
+    num_workers = 4,
+    pin_memory = True,
     drop_last = False
 )
 

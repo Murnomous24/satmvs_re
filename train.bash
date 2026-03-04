@@ -9,7 +9,7 @@ GEO_MODEL="rpc"
 GPU_ID="0"
 BATCH_SIZE=1
 MIN_INTERVAL=0.5
-EPOCH=1000
+EPOCH=5
 # TRAIN_LOADCKPT="/home/murph_dl/Paper_Re/SatMVS_Re/checkpoints/casmvs/rpc/20260113_192816/model_000227.ckpt"
 # RESUME=True
 

@@ -92,7 +92,8 @@ class MVSDataset(Dataset):
         }
 
         # multi stage mask map
-        mask = np.float32((depth_image >= depth_min) * 1.0) * np.float32((depth_image <= depth_max) * 1.0)
+        # Use bitwise & and single astype conversion to save memory/cpu
+        mask = ((depth_image >= depth_min) & (depth_image <= depth_max)).astype(np.float32)
         mask_ms = {
             "stage1": cv2.resize(mask, (w // 4, h // 4), interpolation=cv2.INTER_NEAREST),
             "stage2": cv2.resize(mask, (w // 2, h // 2), interpolation=cv2.INTER_NEAREST),

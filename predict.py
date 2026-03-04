@@ -48,9 +48,35 @@ def predict_batch(model, sample, ndepths):
     )
 
     # get metrices
+    # num_stage = len([int(depth) for depth in ndepths.split(",") if depth])
+    # depth_est = outputs[f"stage{num_stage}"]["depth"]
+    # photometric_confidence = outputs[f"stage{num_stage}"]["photometric_confidence"]
+
+    # wrap outputs
+    # image_outputs = {
+    #    "depth_est": depth_est,
+    #    "photometric_confidence": photometric_confidence
+    # }
+    
+    # return image_outputs
+
+    # get metrices
     num_stage = len([int(depth) for depth in ndepths.split(",") if depth])
     depth_est = outputs[f"stage{num_stage}"]["depth"]
     photometric_confidence = outputs[f"stage{num_stage}"]["photometric_confidence"]
+
+    scalar_outputs = {}
+    if "depth" in sample_cuda and "mask" in sample_cuda:
+        depth_gt_ms = sample_cuda["depth"]
+        mask_ms = sample_cuda["mask"]
+        depth_final_gt = depth_gt_ms[f"stage{num_stage}"]
+        mask_final = mask_ms[f"stage{num_stage}"]
+        
+        scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["threshold_1.0m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
+        scalar_outputs["threshold_2.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
+        scalar_outputs["threshold_7.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
 
     # wrap outputs
     image_outputs = {
@@ -58,8 +84,7 @@ def predict_batch(model, sample, ndepths):
         "photometric_confidence": photometric_confidence
     }
     
-    return image_outputs
-
+    return image_outputs, tensor2float(scalar_outputs)
 def predict_cli(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
@@ -107,7 +132,8 @@ def predict_cli(args):
         pred_dataset,
         args.batch_size,
         shuffle = False,
-        num_workers = 0,
+        num_workers = 4,
+        pin_memory = True,
         drop_last = False
     )
 
@@ -140,15 +166,18 @@ def predict_cli(args):
     state_dict = torch.load(loadckpt)
     model.load_state_dict(state_dict['model'])
 
+    avg_test_scalars = DictAverageMeter()
     for batch_idx, sample in enumerate(tqdm(pred_loader, desc="Predict", unit="batch")):
         start_time = time.perf_counter()
         b_idx = str(sample['view_idx'][0])
         b_name = str(sample['view_name'][0])
 
-        image_outputs = predict_batch(model, sample, args.ndepths)
+        image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths)
+        avg_test_scalars.update(scalar_outputs)
+
         torch.cuda.synchronize()
         batch_time = time.perf_counter() - start_time
-        print(f'Iter {batch_idx}/{len(pred_loader)}, name {b_name}, time = {batch_time}')
+        print(f'Iter {batch_idx}/{len(pred_loader)}, name {b_name}, time = {batch_time}, metrics = {scalar_outputs}')
 
         # modify results's format
         depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
@@ -174,6 +203,13 @@ def predict_cli(args):
         plt.imsave(conf_color_path, prob, format="png")
 
         print(f'Iter {batch_idx}/{len(pred_loader)}, Saved: {depth_path} , {conf_path}, time = {time.perf_counter() - start_time:.3f}s')
+
+    print(f"avg_test_scalars: {avg_test_scalars.mean()}")
+    # write prediction metrics
+    record_path = os.path.join(pred_log_dir, 'predict_record.txt')
+    current_avg_metrics = avg_test_scalars.mean()
+    with open(record_path, "a+", encoding="utf-8") as f:
+        f.write(f"Predict Metrics: {current_avg_metrics}\n")
 
 def predict(
         output_path,
@@ -201,7 +237,8 @@ def predict(
         pred_dataset,
         cfg.batch_size,
         shuffle = False,
-        num_workers = 8,
+        num_workers = 4,
+        pin_memory = True,
         drop_last = False
     )
     
@@ -237,13 +274,16 @@ def predict(
     mkdir_if_not_exist(output_folder)
 
     # model inference
+    avg_test_scalars = DictAverageMeter()
     for batch_idx, sample in enumerate(tqdm(pred_loader, desc="Predict dsm", unit="batch")):
         start_time = time.time()
         b_idx = str(sample['view_idx'][0])
         b_name = str(sample['view_name'][0])
 
         # build result
-        image_outputs = predict_batch(model, sample, cfg.ndepths)
+        image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths)
+        avg_test_scalars.update(scalar_outputs)
+        
         depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
         prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))
 
@@ -265,9 +305,16 @@ def predict(
         save_pfm(os.path.join(output_folder_view_prob, f"{b_name}.pfm"), prob.astype(np.float32))
         plt.imsave(os.path.join(output_folder_view_prob_color, f"{b_name}.png"), prob, format="png")
 
-        print("Iter {}/{}, {}, time = {:.3f}".format(batch_idx, len(pred_loader), b_name, time.time() - start_time))
+        print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), b_name, time.time() - start_time, scalar_outputs))
 
         del image_outputs
+    
+    print(f"avg_test_scalars: {avg_test_scalars.mean()}")
+    # write prediction metrics
+    record_path = os.path.join(output_path, 'predict_record.txt')
+    current_avg_metrics = avg_test_scalars.mean()
+    with open(record_path, "a+", encoding="utf-8") as f:
+        f.write(f"Predict Metrics: {current_avg_metrics}\n")
 
 
 if __name__ == '__main__':

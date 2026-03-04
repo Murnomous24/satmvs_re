@@ -5,3 +5,4 @@ data/
 checkpoints/
 
 dsm_results/
+train_log/
