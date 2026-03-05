@@ -32,6 +32,8 @@ parser.add_argument('--ndepths', type = str, default = "64,32,8", help = "number
 parser.add_argument('--min_interval', type = float, default = 2.5, help = "min interval of each depth plane")
 parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help = "depth interval ratio") # TODO: what
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
+parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
+parser.add_argument('--attn_temp', type = float, default = 2.0, help = 'attention temperature for eta')
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
 
@@ -145,7 +147,9 @@ def predict_cli(args):
             min_interval = args.min_interval,
             ndepths = [int(depth) for depth in args.ndepths.split(",") if depth],
             depth_intervals_ratio = [float(interval) for interval in args.depth_inter_ratio.split(",") if interval],
-            cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch]
+            cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch],
+            eta = args.eta,
+            attn_temp = args.attn_temp
         )
         print("use CascadeMVSNet model")
     else:
@@ -180,29 +184,39 @@ def predict_cli(args):
         print(f'Iter {batch_idx}/{len(pred_loader)}, name {b_name}, time = {batch_time}, metrics = {scalar_outputs}')
 
         # modify results's format
-        depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
-        prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))
-
-        # save depth and confidence in PFM format
-        depth_dir = os.path.join(pred_log_dir, "depth_est", b_idx)
-        conf_dir = os.path.join(pred_log_dir, "confidence", b_idx)
-        depth_color_dir = os.path.join(depth_dir, "color")
-        conf_color_dir = os.path.join(conf_dir, "color")
-        os.makedirs(depth_dir, exist_ok=True)
-        os.makedirs(conf_dir, exist_ok=True)
-        os.makedirs(depth_color_dir, exist_ok=True)
-        os.makedirs(conf_color_dir, exist_ok=True)
+        depth_est_batch = tensor2numpy(image_outputs["depth_est"])
+        prob_batch = tensor2numpy(image_outputs["photometric_confidence"])
         
-        depth_path = os.path.join(depth_dir, f"{b_name}.pfm")
-        conf_path = os.path.join(conf_dir, f"{b_name}.pfm")
-        depth_color_path = os.path.join(depth_color_dir, f"{b_name}.png")
-        conf_color_path = os.path.join(conf_color_dir, f"{b_name}.png")
-        save_pfm(depth_path, depth_est.astype(np.float32))
-        save_pfm(conf_path, prob.astype(np.float32))
-        plt.imsave(depth_color_path, depth_est, format="png")
-        plt.imsave(conf_color_path, prob, format="png")
+        # Iterate over batch
+        batch_size = depth_est_batch.shape[0]
+        for i in range(batch_size):
+            depth_est = np.squeeze(depth_est_batch[i])
+            prob = np.float32(np.squeeze(prob_batch[i]))
+            
+            curr_b_idx = str(sample['view_idx'][i]) if isinstance(sample['view_idx'], list) or isinstance(sample['view_idx'], torch.Tensor) else str(sample['view_idx'][i].item())
+            curr_b_name = str(sample['view_name'][i])
 
-        print(f'Iter {batch_idx}/{len(pred_loader)}, Saved: {depth_path} , {conf_path}, time = {time.perf_counter() - start_time:.3f}s')
+            # save depth and confidence in PFM format
+            depth_dir = os.path.join(pred_log_dir, "depth_est", curr_b_idx)
+            conf_dir = os.path.join(pred_log_dir, "confidence", curr_b_idx)
+            depth_color_dir = os.path.join(depth_dir, "color")
+            conf_color_dir = os.path.join(conf_dir, "color")
+            os.makedirs(depth_dir, exist_ok=True)
+            os.makedirs(conf_dir, exist_ok=True)
+            os.makedirs(depth_color_dir, exist_ok=True)
+            os.makedirs(conf_color_dir, exist_ok=True)
+            
+            depth_path = os.path.join(depth_dir, f"{curr_b_name}.pfm")
+            conf_path = os.path.join(conf_dir, f"{curr_b_name}.pfm")
+            depth_color_path = os.path.join(depth_color_dir, f"{curr_b_name}.png")
+            conf_color_path = os.path.join(conf_color_dir, f"{curr_b_name}.png")
+            
+            save_pfm(depth_path, depth_est.astype(np.float32))
+            save_pfm(conf_path, prob.astype(np.float32))
+            plt.imsave(depth_color_path, depth_est, format="png")
+            plt.imsave(conf_color_path, prob, format="png")
+
+            print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
 
     print(f"avg_test_scalars: {avg_test_scalars.mean()}")
     # write prediction metrics
@@ -251,7 +265,9 @@ def predict(
             min_interval = depth_range[2], # TODO: too hard-code..
             ndepths = [int(depth) for depth in cfg.ndepths.split(",") if depth],
             depth_intervals_ratio = [float(interval) for interval in cfg.depth_inter_ratio.split(",") if interval],
-            cr_base_chs = [int(ch) for ch in cfg.cr_base_chs.split(",") if ch]
+            cr_base_chs = [int(ch) for ch in cfg.cr_base_chs.split(",") if ch],
+            eta = cfg.eta,
+            attn_temp = cfg.attn_temp
         )
         print(f"use CascadeMVSNet model")
     else:

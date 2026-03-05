@@ -1,4 +1,4 @@
-gdal
+gdal==3.4.1
 numpy==1.26.4
 numpy_groupies
 scipy==1.15.3

@@ -27,6 +27,8 @@ parser.add_argument('--share_cr', action='store_true', help='whether share the c
 parser.add_argument('--ndepths', type=str, default="64,32,8", help='ndepths')
 parser.add_argument('--depth_inter_ratio', type=str, default="4,2,1", help='depth_intervals_ratio')
 parser.add_argument('--cr_base_chs', type=str, default="8,8,8", help='cost regularization base channels')
+parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
+parser.add_argument('--attn_temp', type = float, default = 2.0, help = 'attention temperature for eta')
 
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")

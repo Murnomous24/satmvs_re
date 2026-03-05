@@ -34,6 +34,9 @@ def compute_metrics_for_each_image(metric_func):
         for idx in range(batch_size):
             ret = metric_func(depth_est[idx], depth_gt[idx], mask[idx], *args)
             results.append(ret)
+        results = [r for r in results if not torch.isnan(r)] # filter nan
+        if len(results) == 0:
+             return torch.tensor(0.0, device=depth_gt.device)
         return torch.stack(results).mean()
 
     return wrapper
