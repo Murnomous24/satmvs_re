@@ -25,5 +25,6 @@ python train.py \
     --batch_size=$BATCH_SIZE \
     --min_interval=$MIN_INTERVAL \
     --epochs=$EPOCH \
+    --eta
     # --train_loadckpt="$TRAIN_LOADCKPT" \
     # --resume=$RESUME

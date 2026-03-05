@@ -34,6 +34,8 @@ parser.add_argument('--min_interval', type = float, default = 2.5, help = "min i
 parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help = "depth interval ratio") # TODO: what
 parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage')
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
+parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
+parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
 # training setting
 parser.add_argument('--epochs', type = int, default = 30, help = 'number of epochs of training')
 parser.add_argument('--lr', type = float, default = 0.001, help = 'learning rate')
@@ -121,7 +123,9 @@ if args.model == "casmvs":
         min_interval = args.min_interval,
         ndepths = [int(depth) for depth in args.ndepths.split(",") if depth],
         depth_intervals_ratio = [float(interval) for interval in args.depth_inter_ratio.split(",") if interval],
-        cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch]
+        cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch],
+        eta = args.eta,
+        attn_temp = args.attn_temp
     )
     print(f"use CascadeMVSNet model")
 else:

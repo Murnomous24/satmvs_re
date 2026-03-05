@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 from modules.module import *
 from modules.warping import *
@@ -18,8 +19,11 @@ class DepthNet(nn.Module):
             proj_matrices,
             depth_values,
             num_depth,
-            cost_regular_func, # TODO
-            geo_model, # TODO
+            cost_regular_func,
+            geo_model,
+            eta = False, 
+            attn_temp = 1.0,
+            group_cor_dim = 8,
     ):
         proj_matrices = torch.unbind(proj_matrices, 1) # [B, N, 4, 4] tensor to length Nview's python list
         assert len(features) == len(proj_matrices), f"casmvs: features and projection matrices do not match, get {len(features)} and {len(proj_matrices)}"
@@ -29,38 +33,75 @@ class DepthNet(nn.Module):
         ref_fea, src_feas = features[0], features[1:] # ref_fea : [B, C, H, W]
         ref_proj, src_projs = proj_matrices[0], proj_matrices[1:] # ref_proj: [B, 4, 4]
 
-        ref_volume = ref_fea.unsqueeze(2).repeat(1, 1, num_depth, 1, 1) # [B, C, Ndepth, H, W]
-        volume_sum = ref_volume
-        volume_sq_sum = ref_volume ** 2
-        del ref_volume # TODO: why del
-
-        if geo_model == "rpc":
-            batch, fea, height, width = ref_fea.shape
-            coef = torch.ones((batch, height * width * num_depth, 20), dtype = torch.double).cuda() # [B, H * W * Ndepth, 20]
-        elif geo_model == "pinhole":
-            coef = None
-        else:
-            raise Exception(f"casmvs: invaild 'geo_model', get {geo_model}")
-
-        # build cost volume
-        for src_fea, src_proj in zip(src_feas, src_projs): # TODO: how we loop
+        if eta:
+            ref_volume = ref_fea.unsqueeze(2).repeat(1, 1, num_depth, 1, 1) # [B, C, Ndepth, H, W]
+            cor_weight_sum = 1e-8
+            cor_feats = 0
             if geo_model == "rpc":
-                warped_volume = rpc_warping(src_fea, src_proj, ref_proj, depth_values, coef)
+                batch, fea, height, width = ref_fea.shape
+                coef = torch.ones((batch, height * width * num_depth, 20), dtype = torch.double).cuda() # [B, H * W * Ndepth, 20]
             elif geo_model == "pinhole":
-                warped_volume = pinhole_warping(src_fea, src_proj, ref_proj, depth_values)
+                coef = None
+            else:
+                raise Exception(f"casmvs: invaild 'geo_model', get {geo_model}")
             
-            if self.training:
-                volume_sum = volume_sum + warped_volume
-                volume_sq_sum = volume_sq_sum + warped_volume ** 2
-            else: # TODO: why do this
-                volume_sum += warped_volume
-                volume_sq_sum += warped_volume.pow_(2)
-            del warped_volume
-        num_views = len(features)
-        volume_var = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2)) # [B, C, Ndepth, H, W]
+            # build cost volume
+            for src_fea, src_proj in zip(src_feas, src_projs):
+                if geo_model == "rpc":
+                    warped_volume = rpc_warping(src_fea, src_proj, ref_proj, depth_values, coef)
+                elif geo_model == "pinhole":
+                    warped_volume = pinhole_warping(src_fea, src_proj, ref_proj, depth_values)
+                
+                # group it
+                warped_volume = warped_volume.reshape(depth_values.shape[0], group_cor_dim, ref_fea.shape[1] // group_cor_dim, depth_values.shape[1], depth_values.shape[2], depth_values.shape[3]) # [B, G, Ndepth, H, W]
+                # Avoid ref_volume overwrite
+                ref_volume_group = ref_volume.reshape(depth_values.shape[0], group_cor_dim, ref_fea.shape[1] // group_cor_dim, depth_values.shape[1], depth_values.shape[2], depth_values.shape[3])
+                cor_feat = (warped_volume * ref_volume_group).mean(2) # [B, G, Ndepth, H, W]
+                
+                del warped_volume
+
+                # eta calculation
+                cor_weight = torch.softmax(cor_feat.sum(1) / attn_temp, 1) / math.sqrt(ref_fea.shape[1]) # [B, Ndepth, H, W]
+                cor_weight_sum += cor_weight # [B, Ndepth, H, W]
+                cor_feats += cor_feat * cor_weight.unsqueeze(1) # [B, C, Ndepth, H, W]
+
+                del cor_weight, cor_feat
+
+            # weight sum and average
+            volume_final = cor_feats / cor_weight_sum.unsqueeze(1) # [B, C, Ndepth, H, W]
+        else:
+            ref_volume = ref_fea.unsqueeze(2).repeat(1, 1, num_depth, 1, 1) # [B, C, Ndepth, H, W]
+            volume_sum = ref_volume
+            volume_sq_sum = ref_volume ** 2
+            del ref_volume # TODO: why del
+
+            if geo_model == "rpc":
+                batch, fea, height, width = ref_fea.shape
+                coef = torch.ones((batch, height * width * num_depth, 20), dtype = torch.double).cuda() # [B, H * W * Ndepth, 20]
+            elif geo_model == "pinhole":
+                coef = None
+            else:
+                raise Exception(f"casmvs: invaild 'geo_model', get {geo_model}")
+
+            # build cost volume
+            for src_fea, src_proj in zip(src_feas, src_projs): # TODO: how we loop
+                if geo_model == "rpc":
+                    warped_volume = rpc_warping(src_fea, src_proj, ref_proj, depth_values, coef)
+                elif geo_model == "pinhole":
+                    warped_volume = pinhole_warping(src_fea, src_proj, ref_proj, depth_values)
+                
+                if self.training:
+                    volume_sum = volume_sum + warped_volume
+                    volume_sq_sum = volume_sq_sum + warped_volume ** 2
+                else: # TODO: why do this
+                    volume_sum += warped_volume
+                    volume_sq_sum += warped_volume.pow_(2)
+                del warped_volume
+            num_views = len(features)
+            volume_final = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2)) # [B, C, Ndepth, H, W]
 
         # cost volume regularization & depth
-        cost_regular = cost_regular_func(volume_var) # TODO: dim?
+        cost_regular = cost_regular_func(volume_final) # TODO: dim?
         prob_volume = cost_regular.squeeze(1) # TODO: dim? 
         prob_volume = F.softmax(prob_volume, dim = 1) # [B, Ndepth, H, W]
         depth = depth_regression(prob_volume, depth_values)
@@ -94,7 +135,10 @@ class CascadeMVSNet(nn.Module):
             share_cr = False,
             grad_method = "detach",
             arch_mode = "fpn",
-            cr_base_chs = [8, 8, 8]
+            cr_base_chs = [8, 8, 8],
+            eta = False,
+            attn_temp = 1.0,
+            group_cor_dim = 8
     ):
         super(CascadeMVSNet, self).__init__()
         
@@ -108,6 +152,9 @@ class CascadeMVSNet(nn.Module):
         self.cr_base_chs = cr_base_chs
         self.num_stage = len(ndepths)
         self.min_interval = min_interval
+        self.eta = eta
+        self.attn_temp = attn_temp
+        self.group_cor_dim = group_cor_dim
         self.stage_infos = {
             "stage1": { "scale": 4.0 },
             "stage2": { "scale": 2.0 },
@@ -124,13 +171,13 @@ class CascadeMVSNet(nn.Module):
         )
         if self.share_cr:
             self.cost_regularization = CostRegNet(
-                in_channels = self.feature.out_channels,
+                in_channels = self.group_cor_dim if self.eta else self.feature.out_channels[0], # Assuming same channel for share_cr or using first
                 base_channels = 8
             )
         else:
             self.cost_regularization = nn.ModuleList(
                 [CostRegNet(
-                    in_channels = self.feature.out_channels[index],
+                    in_channels = self.group_cor_dim if self.eta else self.feature.out_channels[index],
                     base_channels = self.cr_base_chs[index]
                 ) for index in range (self.num_stage)]
             )
@@ -197,7 +244,10 @@ class CascadeMVSNet(nn.Module):
                 ).squeeze(1),
                 self.ndepths[index],
                 self.cost_regularization if self.share_cr else self.cost_regularization[index],
-                self.geo_model
+                self.geo_model,
+                eta = self.eta,
+                attn_temp = self.attn_temp,
+                group_cor_dim = self.group_cor_dim
             )
 
             last_depth = output_stage['depth']
