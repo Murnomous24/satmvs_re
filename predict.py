@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 import torch
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import cv2
@@ -13,6 +14,7 @@ from dataset.data_io import save_pfm
 from tools.utils import *
 from dataset import find_dataset
 from networks.casmvs import *
+from networks.loss import casmvs_loss
 
 parser = argparse.ArgumentParser(description = "satmvs_re predicting file")
 # arguments option
@@ -34,11 +36,13 @@ parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help =
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 2.0, help = 'attention temperature for eta')
+parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage (for eval metrics)')
+parser.add_argument('--summary_freq', type = int, default = 50, help = 'tensorboard summary frequency in prediction')
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
 
 @make_nograd_func
-def predict_batch(model, sample, ndepths):
+def predict_batch(model, sample, ndepths, dlossw=None):
     model.eval()
 
     # run multi-stage mvs pipeline
@@ -73,20 +77,40 @@ def predict_batch(model, sample, ndepths):
         mask_ms = sample_cuda["mask"]
         depth_final_gt = depth_gt_ms[f"stage{num_stage}"]
         mask_final = mask_ms[f"stage{num_stage}"]
+
+        # Keep metric set consistent with train.py (test_batch detailed_summary=True).
+        loss, depth_loss = casmvs_loss(
+            outputs,
+            depth_gt_ms,
+            mask_ms,
+            dlossw = [float(weight) for weight in dlossw.split(",") if weight] if dlossw is not None else None
+        )
+        scalar_outputs["loss"] = loss
+        scalar_outputs["depth_loss"] = depth_loss
+        scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
         
         scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
         scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
         scalar_outputs["threshold_1.0m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
         scalar_outputs["threshold_2.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
         scalar_outputs["threshold_7.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
+        scalar_outputs["completeness"] = Completeness_metrics(photometric_confidence, depth_final_gt, mask_final > 0.5)
 
     # wrap outputs
     image_outputs = {
         "depth_est": depth_est,
         "photometric_confidence": photometric_confidence
     }
+
+    if "depth" in sample_cuda and "mask" in sample_cuda:
+        image_outputs["depth_gt"] = depth_final_gt
+        image_outputs["ref_image"] = sample_cuda["images"][:, 0]
+        image_outputs["mask"] = mask_final
+        image_outputs["errormap"] = (depth_est - depth_final_gt).abs()
     
     return image_outputs, tensor2float(scalar_outputs)
+
+
 def predict_cli(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
@@ -121,6 +145,11 @@ def predict_cli(args):
     pred_log_dir = os.path.join(cur_log_dir, 'predict')
     os.makedirs(pred_log_dir, exist_ok=True)
     print(f"log directory: {pred_log_dir}")
+
+    tb_log_dir = os.path.join(pred_log_dir, "tensorboard")
+    os.makedirs(tb_log_dir, exist_ok=True)
+    logger = SummaryWriter(tb_log_dir)
+    print(f"tensorboard directory: {tb_log_dir}")
 
     # dataset and dataloader
     mvsdataset = find_dataset(args.geo_model)
@@ -176,8 +205,15 @@ def predict_cli(args):
         b_idx = str(sample['view_idx'][0])
         b_name = str(sample['view_name'][0])
 
-        image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths)
-        avg_test_scalars.update(scalar_outputs)
+        image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths, args.dlossw)
+        if len(scalar_outputs) > 0:
+            avg_test_scalars.update(scalar_outputs)
+
+        global_step = batch_idx
+        if global_step % args.summary_freq == 0:
+            if len(scalar_outputs) > 0:
+                save_scalars(logger, 'predict', scalar_outputs, global_step)
+            save_images(logger, 'predict', image_outputs, global_step)
 
         torch.cuda.synchronize()
         batch_time = time.perf_counter() - start_time
@@ -218,6 +254,7 @@ def predict_cli(args):
 
             print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
 
+    logger.close()
     print(f"avg_test_scalars: {avg_test_scalars.mean()}")
     # write prediction metrics
     record_path = os.path.join(pred_log_dir, 'predict_record.txt')
@@ -297,8 +334,9 @@ def predict(
         b_name = str(sample['view_name'][0])
 
         # build result
-        image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths)
-        avg_test_scalars.update(scalar_outputs)
+        image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths, getattr(cfg, "dlossw", None))
+        if len(scalar_outputs) > 0:
+            avg_test_scalars.update(scalar_outputs)
         
         depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
         prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))

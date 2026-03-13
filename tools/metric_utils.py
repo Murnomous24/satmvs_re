@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torchvision.utils as vutils
+import cv2
 
 # torch.no_grad warpper for functions
 def make_nograd_func(func):
@@ -133,9 +134,95 @@ def save_scalars(logger, mode, scalar_dict, global_step):
 def save_images(logger, mode, images_dict, global_step):
     images_dict = tensor2numpy(images_dict)
 
+    def first_map(img):
+        # Keep behavior aligned with previous implementation: log first sample only.
+        if img.ndim == 4:
+            return img[0]
+        if img.ndim == 3:
+            return img[0]
+        raise NotImplementedError("invalid img dim {} in save_images".format(img.ndim))
+
+    def get_valid_mask(h, w):
+        mask_data = images_dict.get("mask", None)
+        if mask_data is None:
+            return np.ones((h, w), dtype=bool)
+
+        mask_map = first_map(mask_data)
+        if mask_map.ndim == 3 and mask_map.shape[0] == 1:
+            mask_map = mask_map[0]
+        if mask_map.shape != (h, w):
+            return np.ones((h, w), dtype=bool)
+        return mask_map > 0.5
+
+    def colorize_depth(depth):
+        h, w = depth.shape
+        valid = np.isfinite(depth) & get_valid_mask(h, w)
+        color = np.zeros((h, w, 3), dtype=np.uint8)
+        color[:, :] = np.array([20, 20, 20], dtype=np.uint8)
+
+        if np.any(valid):
+            valid_values = depth[valid]
+            vmin, vmax = np.percentile(valid_values, [2.0, 98.0])
+            if vmax <= vmin:
+                vmin = float(valid_values.min())
+                vmax = float(valid_values.max()) + 1e-6
+
+            depth_norm = np.clip((depth - vmin) / (vmax - vmin + 1e-6), 0.0, 1.0)
+            depth_u8 = (depth_norm * 255.0).astype(np.uint8)
+            depth_color = cv2.applyColorMap(depth_u8, cv2.COLORMAP_TURBO)
+            depth_color = cv2.cvtColor(depth_color, cv2.COLOR_BGR2RGB)
+            color[valid] = depth_color[valid]
+
+        return torch.from_numpy(np.transpose(color, (2, 0, 1))).float() / 255.0
+
+    def colorize_errormap(error_map):
+        h, w = error_map.shape
+        valid = np.isfinite(error_map) & get_valid_mask(h, w)
+        mapped = np.zeros_like(error_map, dtype=np.float32)
+
+        m1 = error_map < 1.0
+        mapped[m1] = (error_map[m1] / 1.0) * 96.0
+
+        m2 = (error_map >= 1.0) & (error_map < 2.5)
+        mapped[m2] = 96.0 + ((error_map[m2] - 1.0) / 1.5) * (160.0 - 96.0)
+
+        m3 = (error_map >= 2.5) & (error_map < 7.5)
+        mapped[m3] = 160.0 + ((error_map[m3] - 2.5) / 5.0) * (224.0 - 160.0)
+
+        m4 = error_map >= 7.5
+        mapped[m4] = np.clip(224.0 + ((error_map[m4] - 7.5) / 2.5) * 31.0, 224.0, 255.0)
+
+        mapped_u8 = mapped.astype(np.uint8)
+        color = cv2.applyColorMap(mapped_u8, cv2.COLORMAP_JET)
+        color = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
+        color[~valid] = 0
+        return torch.from_numpy(np.transpose(color, (2, 0, 1))).float() / 255.0
+
+    def colorize_mask(mask_map):
+        valid = mask_map > 0.5
+        h, w = mask_map.shape
+        color = np.zeros((h, w, 3), dtype=np.uint8)
+        # Green: valid pixels kept for supervision; Red: pruned pixels.
+        color[valid] = np.array([0, 220, 0], dtype=np.uint8)
+        color[~valid] = np.array([220, 30, 30], dtype=np.uint8)
+        return torch.from_numpy(np.transpose(color, (2, 0, 1))).float() / 255.0
+
     def preprocess(name, img):
         if not (len(img.shape) == 3 or len(img.shape) == 4):
             raise NotImplementedError("invalid img shape {}:{} in save_images".format(name, img.shape))
+
+        vis_key = name.split("/")[-1].lower()
+        img_map = first_map(img)
+
+        if img_map.ndim == 2 and ("depth_est" in vis_key or "depth_gt" in vis_key):
+            return colorize_depth(img_map)
+
+        if img_map.ndim == 2 and ("errormap" in vis_key or "error_map" in vis_key):
+            return colorize_errormap(img_map)
+
+        if img_map.ndim == 2 and vis_key == "mask":
+            return colorize_mask(img_map)
+
         if len(img.shape) == 3:
             img = img[:, np.newaxis, :, :]
         img = torch.from_numpy(img[:1])

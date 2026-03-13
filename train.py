@@ -7,6 +7,7 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn as nn
+from tqdm import tqdm
 
 from tools.utils import *
 from dataset import find_dataset
@@ -212,14 +213,14 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     }
     image_outputs = {
         "depth_est": depth_est,
-        "depth_gt": sample["depth"]["stage3"], # TODO: why stage1
-        "ref_image": sample["images"][:, 0],
-        "mask": sample["mask"]["stage3"]  # TODO: why stage1
+        "depth_gt": depth_final_gt,
+        "ref_image": sample_cuda["images"][:, 0],
+        "mask": mask_final
     }
 
     # summary if needed
     if detailed_summary:
-        image_outputs["errormap"] = (depth_est - depth_final_gt).abs() * mask_final
+        image_outputs["errormap"] = (depth_est - depth_final_gt).abs()
         scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
         scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
         scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
@@ -267,14 +268,14 @@ def test_batch(sample, detailed_summary = False):
     image_outputs = {
         "depth_est": depth_est,
         "photometric_confidence": photometric_confidence,
-        "depth_gt": sample["depth"]["stage3"],  # TODO: why stage1
-        "ref_image": sample["images"][:, 0],
-        "mask": sample["mask"]["stage3"]  # TODO: why stage1
+        "depth_gt": depth_final_gt,
+        "ref_image": sample_cuda["images"][:, 0],
+        "mask": mask_final
     }
 
     # summary if needed
     if detailed_summary:
-        image_outputs["errormap"] = (depth_est - depth_final_gt).abs() * mask_final
+        image_outputs["errormap"] = (depth_est - depth_final_gt).abs()
         scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
         scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
         scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
@@ -295,13 +296,15 @@ def train():
         last_epoch = start_epoch - 1
     )
 
-    for epoch_idx in range(start_epoch, args.epochs):
+    # Include args.epochs itself so --epochs=N runs N epochs (1..N by default).
+    for epoch_idx in range(start_epoch, args.epochs + 1):
         print(f"epoch {epoch_idx}")
 
         global_step = len(train_loader) * epoch_idx # batch * epoch TODO right ?
 
         # train
-        for batch_idx, sample in enumerate(train_loader):
+        train_pbar = tqdm(enumerate(train_loader), total = len(train_loader), desc = f"Train {epoch_idx}/{args.epochs}", unit = "batch")
+        for batch_idx, sample in train_pbar:
             start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
@@ -318,12 +321,14 @@ def train():
             if bool_summary:
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
-            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
+            train_pbar.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
+            tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
             del scalar_outputs, image_outputs
     
         # test
         avg_test_scalars = DictAverageMeter()
-        for batch_idx, sample in enumerate(test_loader):
+        test_pbar = tqdm(enumerate(test_loader), total = len(test_loader), desc = f"Test {epoch_idx}/{args.epochs}", unit = "batch")
+        for batch_idx, sample in test_pbar:
             start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
@@ -341,7 +346,8 @@ def train():
                 save_images(logger, 'test', image_outputs, global_step)
             avg_test_scalars.update(scalar_outputs) # update scalars
             
-            print(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, test loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
+            test_pbar.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
+            tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(test_loader)}, test loss = {loss}, time = {batch_time}, test_result = {scalar_outputs}')
             del scalar_outputs, image_outputs
         save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")
