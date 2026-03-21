@@ -35,7 +35,7 @@ parser.add_argument('--min_interval', type = float, default = 2.5, help = "min i
 parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help = "depth interval ratio") # TODO: what
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
-parser.add_argument('--attn_temp', type = float, default = 2.0, help = 'attention temperature for eta')
+parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
 parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage (for eval metrics)')
 parser.add_argument('--summary_freq', type = int, default = 50, help = 'tensorboard summary frequency in prediction')
 # others setting

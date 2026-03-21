@@ -21,3 +21,4 @@ python predict.py \
     --gpu_id="$GPU_ID" \
     --batch_size=$BATCH_SIZE \
     --min_interval=$MIN_INTERVAL \
+    --eta \
