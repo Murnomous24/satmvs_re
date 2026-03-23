@@ -199,7 +199,21 @@ def save_rpc(path, rpc):
     f.close()
 
 def write_point_cloud(path, points):
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"write_point_cloud: points shape should be [N, 3], got {points.shape}")
+
+    # Drop invalid points before LAS integer quantization.
+    finite_mask = np.isfinite(points).all(axis=1)
+    points = points[finite_mask]
+    if points.shape[0] == 0:
+        raise ValueError("write_point_cloud: no valid finite points to write")
+
     pcd = pylas.create()
+
+    # Use offsets near data range to avoid int32 overflow for large UTM coordinates.
+    mins = np.min(points, axis=0)
+    pcd.header.offsets = [float(mins[0]), float(mins[1]), float(mins[2])]
+    pcd.header.scales = [0.001, 0.001, 0.001]
 
     pcd.x = points[:, 0]
     pcd.y = points[:, 1]

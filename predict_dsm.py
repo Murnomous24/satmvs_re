@@ -1,5 +1,6 @@
 import os
 import argparse
+import importlib
 from tools.utils import read_config, mkdir_if_not_exist, read_from_txt, read_pair_from_txt, read_np_array_from_txt
 from dsm_pipeline import Pipeline
 
@@ -40,6 +41,33 @@ parser.add_argument("--workspace", type=str, default="./dsm_results")
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
+
+def _sanitize_omp_num_threads():
+    """Ensure OMP_NUM_THREADS is a positive integer to avoid libgomp runtime errors."""
+    value = os.environ.get("OMP_NUM_THREADS")
+    if value is None:
+        return
+
+    value = value.strip()
+    if value.isdigit() and int(value) > 0:
+        return
+
+    os.environ["OMP_NUM_THREADS"] = "1"
+    print("[WARN] Invalid OMP_NUM_THREADS detected, fallback to OMP_NUM_THREADS=1")
+
+
+def _check_gdal_array_binding():
+    """Fail early with actionable message when GDAL python bindings are incomplete."""
+    try:
+        importlib.import_module("osgeo.gdal_array")
+    except Exception as exc:
+        raise RuntimeError(
+            "GDAL python binding is incomplete: failed to import osgeo.gdal_array. "
+            "Please reinstall GDAL in a conda environment (recommended):\n"
+            "  conda install -c conda-forge gdal\n"
+            "or reinstall with pip after numpy is installed."
+        ) from exc
+
 def read_project(project_info_file):
     with open(project_info_file, "r") as f:
         project_str = f.read()
@@ -67,6 +95,9 @@ def read_depth_range(depth_range_info_file):
     return read_np_array_from_txt(depth_range_info_file)
 
 if __name__ == "__main__":
+    _sanitize_omp_num_threads()
+    _check_gdal_array_binding()
+
     config = read_config(args.config_file)
     workspace = args.workspace
     mkdir_if_not_exist(workspace)

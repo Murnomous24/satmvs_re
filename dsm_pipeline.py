@@ -1,5 +1,6 @@
 import copy
 import os
+import shutil
 import numpy as np
 from tqdm import tqdm
 from predict import predict
@@ -123,6 +124,55 @@ class Pipeline:
         self.output_image_paths = [os.path.join(self.output_image_path, f"{idx}") for idx in range(self.view_num)]
         self.output_rpc_paths = [os.path.join(self.output_rpc_path, f"{idx}") for idx in range(self.view_num)]
         self.output_height_paths = [os.path.join(self.output_height_path, f"{idx}") for idx in range(self.view_num)]
+
+    def _log_array_stats(self, block_idx, stage_name, array, valid_mask = None):
+        values = np.asarray(array).reshape(-1)
+        total = values.size
+        finite_mask = np.isfinite(values)
+
+        if valid_mask is not None:
+            valid_mask = np.asarray(valid_mask).reshape(-1).astype(bool)
+            if valid_mask.size != total:
+                print(f"[POINT_STATS][block {block_idx:04d}] {stage_name}: mask_size_mismatch values={total}, mask={valid_mask.size}")
+                return
+            finite_mask = finite_mask & valid_mask
+            valid_total = int(np.sum(valid_mask))
+        else:
+            valid_total = total
+
+        finite_count = int(np.sum(finite_mask))
+        if finite_count == 0:
+            print(f"[POINT_STATS][block {block_idx:04d}] {stage_name}: valid_total={valid_total}, finite=0/{total}, range=[nan, nan]")
+            return
+
+        finite_values = values[finite_mask]
+        print(
+            f"[POINT_STATS][block {block_idx:04d}] {stage_name}: "
+            f"valid_total={valid_total}, finite={finite_count}/{total}, "
+            f"range=[{float(np.min(finite_values)):.6f}, {float(np.max(finite_values)):.6f}]"
+        )
+
+    def _log_points_stats(self, block_idx, stage_name, points):
+        points = np.asarray(points)
+        if points.size == 0:
+            print(f"[POINT_STATS][block {block_idx:04d}] {stage_name}: total=0, finite=0")
+            return
+
+        total = points.shape[0]
+        finite_mask = np.isfinite(points).all(axis = 1)
+        finite_count = int(np.sum(finite_mask))
+
+        if finite_count == 0:
+            print(f"[POINT_STATS][block {block_idx:04d}] {stage_name}: total={total}, finite=0, x=[nan,nan], y=[nan,nan], z=[nan,nan]")
+            return
+
+        pts = points[finite_mask]
+        print(
+            f"[POINT_STATS][block {block_idx:04d}] {stage_name}: total={total}, finite={finite_count}, "
+            f"x=[{float(np.min(pts[:, 0])):.6f},{float(np.max(pts[:, 0])):.6f}], "
+            f"y=[{float(np.min(pts[:, 1])):.6f},{float(np.max(pts[:, 1])):.6f}], "
+            f"z=[{float(np.min(pts[:, 2])):.6f},{float(np.max(pts[:, 2])):.6f}]"
+        )
 
     # blocking properties calculation
     def calculate_block_properties(self):
@@ -364,6 +414,37 @@ class Pipeline:
             os.makedirs(self.output_image_paths[v], exist_ok=True)
             os.makedirs(self.output_rpc_paths[v], exist_ok=True)
             os.makedirs(self.output_height_paths[v], exist_ok=True)
+
+    def sync_mvs_depth_to_height(self):
+        """Copy MVS depth_est PFM files into height/<view>/ for point generation."""
+        mvs_root = os.path.join(self.output_path, "mvs")
+        if not os.path.isdir(mvs_root):
+            print(f"[WARN] MVS output folder not found, skip sync: {mvs_root}")
+            return
+
+        copied = 0
+        for view_idx in range(self.view_num):
+            src_depth_dir = os.path.join(mvs_root, f"{view_idx}", "depth_est")
+            dst_height_dir = self.output_height_paths[view_idx]
+            os.makedirs(dst_height_dir, exist_ok=True)
+            copied_view = 0
+
+            if not os.path.isdir(src_depth_dir):
+                print(f"[WARN] depth_est folder not found for view {view_idx}: {src_depth_dir}")
+                continue
+
+            for file_name in os.listdir(src_depth_dir):
+                if not file_name.endswith(".pfm"):
+                    continue
+                src_path = os.path.join(src_depth_dir, file_name)
+                dst_path = os.path.join(dst_height_dir, file_name)
+                shutil.copy2(src_path, dst_path)
+                copied += 1
+                copied_view += 1
+
+            print(f"[POINT_STATS][sync] view={view_idx}, copied_depth_maps={copied_view}")
+
+        print(f"Synced {copied} depth maps from mvs/depth_est to height folders")
     
     def generate_points(self, block_idx):
         if self.jump_crop[block_idx] == 0:
@@ -381,6 +462,7 @@ class Pipeline:
         for idx in range(self.view_num):
             height_map_path = os.path.join(self.output_height_paths[idx], f"{out_name}.pfm")
             height_map = load_pfm(height_map_path)
+            self._log_array_stats(block_idx, f"height_view{idx}", height_map)
             heights.append(height_map)
 
             rpc_path = os.path.join(self.output_rpc_paths[idx], f"{out_name}.rpc") # TODO
@@ -392,6 +474,9 @@ class Pipeline:
 
         # filter depth map by project and back-project
         mask, heights_est = filter_depth(heights, rpcs, p_ratio = self.p_thred, d_ratio = self.d_thred, geo_consitency_thre = self.geo_num, prob = None, cofidence_ratio = 0.2)
+        mask_count = int(np.sum(mask))
+        print(f"[POINT_STATS][block {block_idx:04d}] geometric_mask: valid={mask_count}/{mask.size} ({(100.0 * mask_count / max(mask.size, 1)):.2f}%)")
+        self._log_array_stats(block_idx, "heights_est(masked)", heights_est, valid_mask = mask)
 
         heights_est = heights_est.reshape(-1)
         mask = mask.reshape(-1)
@@ -405,12 +490,23 @@ class Pipeline:
         x = x[mask]
         y = y[mask]
         heights_final = heights_est[mask]
+        self._log_array_stats(block_idx, "heights_final", heights_final)
+
+        if heights_final.size == 0:
+            print(f"[POINT_STATS][block {block_idx:04d}] no points after geometric filtering")
+            return np.empty((0, 3), dtype=np.float32)
         
         ref_rpc = RPCModel(rpcs[0])
         lat, lon = ref_rpc.photo2obj(x, y, heights_final)
-        geopoints = np.stack([lat, lon], axis = -1)
+        self._log_array_stats(block_idx, "lat", lat)
+        self._log_array_stats(block_idx, "lon", lon)
+        # NOTE: Projection expects geographic coordinates in (lon, lat) order.
+        geopoints = np.stack([lon, lat], axis = -1)
         projpoints = self.projection.project(geopoints, reverse = False)
-        points = np.stack((projpoints[:, 0], projpoints[:, 1], projpoints[:, 2]), axis = -1)
+        self._log_array_stats(block_idx, "proj_x", projpoints[:, 0])
+        self._log_array_stats(block_idx, "proj_y", projpoints[:, 1])
+        points = np.stack((projpoints[:, 0], projpoints[:, 1], heights_final), axis = -1)
+        self._log_points_stats(block_idx, "points_xyz", points)
 
         return points
 
@@ -461,6 +557,7 @@ class Pipeline:
                 self.view_num,
                 self.args
             )
+            self.sync_mvs_depth_to_height()
         
         # build point cloud output
         if self.run_generate_points:
@@ -472,6 +569,13 @@ class Pipeline:
 
             if points:
                 points = np.concatenate(points, axis = 0)
+                finite_mask = np.isfinite(points).all(axis = 1)
+                finite_count = int(np.sum(finite_mask))
+                print(f"[POINT_STATS][global] merged_points: total={points.shape[0]}, finite={finite_count}")
+                if finite_count == 0:
+                    print("[WARN] Skip writing LAS because merged point cloud has no finite xyz")
+                    return
+                points = points[finite_mask]
                 points_output_path = os.path.join(self.output_points_path, "points.las")
                 write_point_cloud(points_output_path, points)
 

@@ -1,18 +1,19 @@
 name: satmvs_re
 dependencies:
   - python=3.10
-  - gdal
-  - numpy<2.0
-  - scipy
-  - matplotlib
-  - tensorboard
-  - opencv
-  - pyyaml
-  - tqdm
-  - pip
+  - gdal=3.11.4
+  - numpy=1.26.4
+  - scipy=1.15.3
+  - matplotlib=3.10.8
+  - tensorboard=2.20.0
+  - opencv=4.12.0
+  - pyyaml=6.0.3
+  - tqdm=4.67.1
+  - pip=25.3
   - pip:
-    - torch==2.1.0
-    - torchvision==0.16.0
-    - torchaudio==2.1.0
-    - tensorboardX
-    - plyfile
+    - tensorboardX==2.6.4
+    - plyfile==1.1.3
+    - opencv-python==4.12.0
+    - opencv-python-headless==4.12.0
+    - requests==2.32.5
+    - networkx==3.4.2

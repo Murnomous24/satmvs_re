@@ -58,11 +58,14 @@ def reproj_and_check(ref_depth, ref_rpc, src_depth, src_rpc, p_ratio, d_ratio):
     src_depth_sample = cv2.remap(src_depth, src_x.astype(np.float32), src_y.astype(np.float32), interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=-999)
 
     # back-project: src(2d) -> wolrd(3d) -> ref(2d)
-    lat, lon = src_rpc_model.photo2obj(src_x.astype(float), src_y.astype(float), src_depth_sample.reshape(-1))
-    reproj_x, reproj_y = ref_rpc_model.obj2photo(lat, lon, src_depth_sample.reshape(-1))
+    src_x_flat = src_x.reshape(-1).astype(float)
+    src_y_flat = src_y.reshape(-1).astype(float)
+    src_depth_flat = src_depth_sample.reshape(-1)
+    lat, lon = src_rpc_model.photo2obj(src_x_flat, src_y_flat, src_depth_flat)
+    reproj_x, reproj_y = ref_rpc_model.obj2photo(lat, lon, src_depth_flat)
 
     # check x,y error
-    xy_diff = np.sqrt((reproj_x - ref_x) ** 2 + (reproj_y - ref_y) ** 2)
+    xy_diff = np.sqrt((reproj_x - ref_x) ** 2 + (reproj_y - ref_y) ** 2).reshape(height, width)
     depth_diff = np.abs(src_depth_sample - ref_depth)
 
     # build mask

@@ -6,6 +6,11 @@ INFO_ROOT="dsm_infos/whu_tlc"
 OUTPUT_DIR="./dsm_results"
 GPU_ID="0"
 
+# Avoid libgomp warnings when OMP_NUM_THREADS is unset or invalid in container environments.
+if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then
+    export OMP_NUM_THREADS=1
+fi
+
 # Run prediction
 python predict_dsm.py \
     --config_file "dsm_config/config.json" \
@@ -21,4 +26,5 @@ python predict_dsm.py \
     --depth_inter_ratio "4,2,1" \
     --cr_base_chs "8,8,8" \
     --gpu_id "$GPU_ID" \
-    --workspace "$OUTPUT_DIR"
+    --workspace "$OUTPUT_DIR" \
+    --eta \
