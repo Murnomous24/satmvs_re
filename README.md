@@ -4,6 +4,7 @@
 - [] 进行训练性能、速度排查和修正
     - Train 阶段 GPU 显存占用率变化大
     - Predict DSM 阶段模型 inference 缓慢
-- [] 加入 feature volume 的融合机制
+- [x] 加入 feature volume 的融合机制
     - MVSTER 中基于 reference view feature volume 和 wraped source view feature volume 的 QKV 计算，对多个 wraped source view feature volume 进行注意力权重的 aggregation
-- [] 排查虚拟容器下运行时因未指定 GDAL 库导致的错误，可能需要在脚本中修改
+- [x] 排查虚拟容器下运行时因未指定 GDAL 库导致的错误，可能需要在脚本中修改
+    - 仍然使用 conda 比较友好
