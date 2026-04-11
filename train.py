@@ -44,6 +44,8 @@ parser.add_argument('--lrepochs', type = str, default = '10,12,14:2', help = 'ep
 parser.add_argument('--wd', type = float, default = 0.0, help = 'weight decay')
 parser.add_argument('--summary_freq', type = int, default = 50, help = 'print and save log frequency')
 parser.add_argument('--save_freq', type = int, default = 1, help = 'save checkpoint frequency')
+parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
+parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
 # others setting
 parser.add_argument('--seed', type = int, default = 42, metavar = 'S', help = 'answer of universe')
 parser.add_argument('--gpu_id', type = str, default = "0")
@@ -51,6 +53,8 @@ parser.add_argument('--gpu_id', type = str, default = "0")
 # parse arguments and check
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+if args.progress_log_freq <= 0:
+    raise ValueError("--progress_log_freq must be > 0")
 
 # get dataset path
 if args.dataset_root is None:
@@ -303,8 +307,9 @@ def train():
         global_step = len(train_loader) * epoch_idx # batch * epoch TODO right ?
 
         # train
-        train_pbar = tqdm(enumerate(train_loader), total = len(train_loader), desc = f"Train {epoch_idx}/{args.epochs}", unit = "batch")
-        for batch_idx, sample in train_pbar:
+        use_tqdm = args.progress_mode == "tqdm"
+        train_iter = tqdm(enumerate(train_loader), total = len(train_loader), desc = f"Train {epoch_idx}/{args.epochs}", unit = "batch") if use_tqdm else enumerate(train_loader)
+        for batch_idx, sample in train_iter:
             start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
@@ -321,14 +326,23 @@ def train():
             if bool_summary:
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
-            train_pbar.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
-            tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
+            if use_tqdm:
+                train_iter.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
+                tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
+            else:
+                is_last = (batch_idx + 1) == len(train_loader)
+                if (batch_idx + 1) % args.progress_log_freq == 0 or batch_idx == 0 or is_last:
+                    print(
+                        f"[Train][{epoch_idx}/{args.epochs}] "
+                        f"iter {batch_idx + 1}/{len(train_loader)}, "
+                        f"loss={loss:.4f}, time={batch_time:.3f}s, metrics={scalar_outputs}"
+                    )
             del scalar_outputs, image_outputs
     
         # test
         avg_test_scalars = DictAverageMeter()
-        test_pbar = tqdm(enumerate(test_loader), total = len(test_loader), desc = f"Test {epoch_idx}/{args.epochs}", unit = "batch")
-        for batch_idx, sample in test_pbar:
+        test_iter = tqdm(enumerate(test_loader), total = len(test_loader), desc = f"Test {epoch_idx}/{args.epochs}", unit = "batch") if use_tqdm else enumerate(test_loader)
+        for batch_idx, sample in test_iter:
             start_time = time.perf_counter()
             global_step = len(train_loader) * epoch_idx + batch_idx
             bool_summary = global_step % args.summary_freq == 0
@@ -346,8 +360,17 @@ def train():
                 save_images(logger, 'test', image_outputs, global_step)
             avg_test_scalars.update(scalar_outputs) # update scalars
             
-            test_pbar.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
-            tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(test_loader)}, test loss = {loss}, time = {batch_time}, test_result = {scalar_outputs}')
+            if use_tqdm:
+                test_iter.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
+                tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(test_loader)}, test loss = {loss}, time = {batch_time}, test_result = {scalar_outputs}')
+            else:
+                is_last = (batch_idx + 1) == len(test_loader)
+                if (batch_idx + 1) % args.progress_log_freq == 0 or batch_idx == 0 or is_last:
+                    print(
+                        f"[Test][{epoch_idx}/{args.epochs}] "
+                        f"iter {batch_idx + 1}/{len(test_loader)}, "
+                        f"loss={loss:.4f}, time={batch_time:.3f}s, metrics={scalar_outputs}"
+                    )
             del scalar_outputs, image_outputs
         save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")

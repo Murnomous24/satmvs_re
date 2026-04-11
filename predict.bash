@@ -9,6 +9,8 @@ GPU_ID="0"
 BATCH_SIZE=1
 MIN_INTERVAL=0.5
 LOADCKPT="/home/murph_dl/Paper_Re/train_log/26_1_31_23_42/model_000005.ckpt"
+PROGRESS_MODE="tqdm"        # options: tqdm | log
+PROGRESS_LOG_FREQ=100
 
 echo "Starting SatMVS predicting: Model=$MODEL, Geo=$GEO_MODEL, GSD=$MIN_INTERVAL"
 
@@ -21,4 +23,6 @@ python predict.py \
     --gpu_id="$GPU_ID" \
     --batch_size=$BATCH_SIZE \
     --min_interval=$MIN_INTERVAL \
-    --eta \
+    --progress_mode="$PROGRESS_MODE" \
+    --progress_log_freq=$PROGRESS_LOG_FREQ \
+    --eta

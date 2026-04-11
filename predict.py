@@ -38,8 +38,16 @@ parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
 parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage (for eval metrics)')
 parser.add_argument('--summary_freq', type = int, default = 50, help = 'tensorboard summary frequency in prediction')
+parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
+parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
+
+def _use_tqdm(progress_mode):
+    return progress_mode == "tqdm"
+
+def _should_log_batch(batch_idx, total_batches, log_freq):
+    return batch_idx == 0 or (batch_idx + 1) == total_batches or ((batch_idx + 1) % log_freq == 0)
 
 @make_nograd_func
 def predict_batch(model, sample, ndepths, dlossw=None):
@@ -113,6 +121,8 @@ def predict_batch(model, sample, ndepths, dlossw=None):
 
 def predict_cli(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+    if args.progress_log_freq <= 0:
+        raise ValueError("--progress_log_freq must be > 0")
 
     print(
         "Predict CLI params: "
@@ -200,7 +210,9 @@ def predict_cli(args):
     model.load_state_dict(state_dict['model'])
 
     avg_test_scalars = DictAverageMeter()
-    for batch_idx, sample in enumerate(tqdm(pred_loader, desc="Predict", unit="batch")):
+    use_tqdm = _use_tqdm(args.progress_mode)
+    pred_iter = tqdm(pred_loader, desc="Predict", unit="batch") if use_tqdm else pred_loader
+    for batch_idx, sample in enumerate(pred_iter):
         start_time = time.perf_counter()
         b_idx = str(sample['view_idx'][0])
         b_name = str(sample['view_name'][0])
@@ -217,7 +229,8 @@ def predict_cli(args):
 
         torch.cuda.synchronize()
         batch_time = time.perf_counter() - start_time
-        print(f'Iter {batch_idx}/{len(pred_loader)}, name {b_name}, time = {batch_time}, metrics = {scalar_outputs}')
+        if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), args.progress_log_freq):
+            print(f'Iter {batch_idx}/{len(pred_loader)}, name {b_name}, time = {batch_time}, metrics = {scalar_outputs}')
 
         # modify results's format
         depth_est_batch = tensor2numpy(image_outputs["depth_est"])
@@ -258,7 +271,8 @@ def predict_cli(args):
             plt.imsave(depth_color_path, depth_est, format="png")
             plt.imsave(conf_color_path, prob, format="png")
 
-            print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
+            if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), args.progress_log_freq):
+                print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
 
     logger.close()
     print(f"avg_test_scalars: {avg_test_scalars.mean()}")
@@ -275,6 +289,8 @@ def predict(
         cfg,
         geo_model = None # for dsm output
 ):
+    if getattr(cfg, "progress_log_freq", 10) <= 0:
+        raise ValueError("--progress_log_freq must be > 0")
     if geo_model is None:
         geo_model = cfg.geo_model
     if cfg.geo_model != geo_model:
@@ -334,7 +350,9 @@ def predict(
 
     # model inference
     avg_test_scalars = DictAverageMeter()
-    for batch_idx, sample in enumerate(tqdm(pred_loader, desc="Predict dsm", unit="batch")):
+    use_tqdm = _use_tqdm(getattr(cfg, "progress_mode", "tqdm"))
+    pred_iter = tqdm(pred_loader, desc="Predict dsm", unit="batch") if use_tqdm else pred_loader
+    for batch_idx, sample in enumerate(pred_iter):
         start_time = time.time()
 
         # build result
@@ -378,7 +396,8 @@ def predict(
             plt.imsave(os.path.join(output_folder_view_prob_color, f"{b_name}.png"), prob, format="png")
 
         first_name = str(sample['view_name'][0])
-        print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), first_name, time.time() - start_time, scalar_outputs))
+        if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), getattr(cfg, "progress_log_freq", 10)):
+            print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), first_name, time.time() - start_time, scalar_outputs))
 
         del image_outputs
     

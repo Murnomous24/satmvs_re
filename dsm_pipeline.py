@@ -22,6 +22,10 @@ class Pipeline:
             args
     ):
         self.args = args
+        self.progress_mode = getattr(args, "progress_mode", "tqdm")
+        self.progress_log_freq = int(getattr(args, "progress_log_freq", 10))
+        if self.progress_log_freq <= 0:
+            raise ValueError("--progress_log_freq must be > 0")
         
         # config
         self.run_crop_img = config["run_crop_img"]
@@ -546,8 +550,14 @@ class Pipeline:
         
         # crop fullsize image to model input size
         if self.run_crop_img:
-            for idx in tqdm(range(self.block_num), desc="Crop Image", unit="block"):
+            crop_iter = tqdm(range(self.block_num), desc="Crop Image", unit="block") if self.progress_mode == "tqdm" else range(self.block_num)
+            if self.progress_mode != "tqdm":
+                print(f"[Crop Image] start, total={self.block_num} blocks")
+            for idx in crop_iter:
                 self.crop_image(idx)
+                if self.progress_mode != "tqdm":
+                    if idx == 0 or (idx + 1) == self.block_num or ((idx + 1) % self.progress_log_freq == 0):
+                        print(f"[Crop Image] progress {idx + 1}/{self.block_num} blocks")
         
         # mvs pipeline, get the height map
         if self.run_mvs:
@@ -562,10 +572,16 @@ class Pipeline:
         # build point cloud output
         if self.run_generate_points:
             points = []
-            for idx in tqdm(range(self.block_num), desc="Generate Points", unit="block"):
+            points_iter = tqdm(range(self.block_num), desc="Generate Points", unit="block") if self.progress_mode == "tqdm" else range(self.block_num)
+            if self.progress_mode != "tqdm":
+                print(f"[Generate Points] start, total={self.block_num} blocks")
+            for idx in points_iter:
                 point = self.generate_points(idx) # TODO: generate point clouds from depth map
                 if point.size > 0:
                     points.append(point)
+                if self.progress_mode != "tqdm":
+                    if idx == 0 or (idx + 1) == self.block_num or ((idx + 1) % self.progress_log_freq == 0):
+                        print(f"[Generate Points] progress {idx + 1}/{self.block_num} blocks")
 
             if points:
                 points = np.concatenate(points, axis = 0)

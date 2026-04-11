@@ -5,6 +5,8 @@ CKPT_PATH="/home/murph_dl/Paper_Re/train_log/26_1_31_23_42/model_000005.ckpt"
 INFO_ROOT="dsm_infos/whu_tlc"
 OUTPUT_DIR="./dsm_results"
 GPU_ID="0"
+PROGRESS_MODE="tqdm"        # options: tqdm | log
+PROGRESS_LOG_FREQ=10
 
 # Avoid libgomp warnings when OMP_NUM_THREADS is unset or invalid in container environments.
 if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then
@@ -26,5 +28,7 @@ python predict_dsm.py \
     --depth_inter_ratio "4,2,1" \
     --cr_base_chs "8,8,8" \
     --gpu_id "$GPU_ID" \
+    --progress_mode "$PROGRESS_MODE" \
+    --progress_log_freq "$PROGRESS_LOG_FREQ" \
     --workspace "$OUTPUT_DIR" \
-    --eta \
+    --eta

@@ -33,6 +33,8 @@ parser.add_argument('--attn_temp', type = float, default = 2.0, help = 'attentio
 
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
+parser.add_argument('--progress_mode', type=str, default="tqdm", choices=["tqdm", "log"], help='progress display mode')
+parser.add_argument('--progress_log_freq', type=int, default=10, help='log frequency in log progress mode (batches/blocks)')
 
 # output
 parser.add_argument("--workspace", type=str, default="./dsm_results")
@@ -95,6 +97,8 @@ def read_depth_range(depth_range_info_file):
     return read_np_array_from_txt(depth_range_info_file)
 
 if __name__ == "__main__":
+    if args.progress_log_freq <= 0:
+        raise ValueError("--progress_log_freq must be > 0")
     _sanitize_omp_num_threads()
     _check_gdal_array_binding()
 
