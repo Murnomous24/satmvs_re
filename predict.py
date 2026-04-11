@@ -228,8 +228,14 @@ def predict_cli(args):
         for i in range(batch_size):
             depth_est = np.squeeze(depth_est_batch[i])
             prob = np.float32(np.squeeze(prob_batch[i]))
-            
-            curr_b_idx = str(sample['view_idx'][i]) if isinstance(sample['view_idx'], list) or isinstance(sample['view_idx'], torch.Tensor) else str(sample['view_idx'][i].item())
+
+            if depth_est.ndim != 2 or prob.ndim != 2:
+                raise ValueError(
+                    f"Predict output shape error at batch {batch_idx}, sample {i}: "
+                    f"depth_est={depth_est.shape}, prob={prob.shape}, expected 2D maps."
+                )
+
+            curr_b_idx = str(sample['view_idx'][i])
             curr_b_name = str(sample['view_name'][i])
 
             # save depth and confidence in PFM format
@@ -330,36 +336,49 @@ def predict(
     avg_test_scalars = DictAverageMeter()
     for batch_idx, sample in enumerate(tqdm(pred_loader, desc="Predict dsm", unit="batch")):
         start_time = time.time()
-        b_idx = str(sample['view_idx'][0])
-        b_name = str(sample['view_name'][0])
 
         # build result
         image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths, getattr(cfg, "dlossw", None))
         if len(scalar_outputs) > 0:
             avg_test_scalars.update(scalar_outputs)
-        
-        depth_est = np.squeeze(tensor2numpy(image_outputs["depth_est"]))
-        prob = np.float32(np.squeeze(tensor2numpy(image_outputs["photometric_confidence"])))
 
-        # create sub-folder
-        output_folder_view = os.path.join(output_folder, b_idx)
-        output_folder_view_depth_map = os.path.join(output_folder_view, "depth_est")
-        output_folder_view_depth_map_color = os.path.join(output_folder_view_depth_map, "color")
-        output_folder_view_prob = os.path.join(output_folder_view, "confidence")
-        output_folder_view_prob_color = os.path.join(output_folder_view_prob, "color")
-        mkdir_if_not_exist(output_folder_view)
-        mkdir_if_not_exist(output_folder_view_depth_map)
-        mkdir_if_not_exist(output_folder_view_depth_map_color)
-        mkdir_if_not_exist(output_folder_view_prob)
-        mkdir_if_not_exist(output_folder_view_prob_color)
+        depth_est_batch = tensor2numpy(image_outputs["depth_est"])
+        prob_batch = tensor2numpy(image_outputs["photometric_confidence"])
 
-        # save result
-        save_pfm(os.path.join(output_folder_view_depth_map, f"{b_name}.pfm"), depth_est.astype(np.float32))
-        plt.imsave(os.path.join(output_folder_view_depth_map_color, f"{b_name}.png"), depth_est, format="png")
-        save_pfm(os.path.join(output_folder_view_prob, f"{b_name}.pfm"), prob.astype(np.float32))
-        plt.imsave(os.path.join(output_folder_view_prob_color, f"{b_name}.png"), prob, format="png")
+        # save per-sample outputs in current batch
+        batch_size = depth_est_batch.shape[0]
+        for i in range(batch_size):
+            b_idx = str(sample['view_idx'][i])
+            b_name = str(sample['view_name'][i])
+            depth_est = np.squeeze(depth_est_batch[i])
+            prob = np.float32(np.squeeze(prob_batch[i]))
 
-        print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), b_name, time.time() - start_time, scalar_outputs))
+            if depth_est.ndim != 2 or prob.ndim != 2:
+                raise ValueError(
+                    f"Predict DSM output shape error at batch {batch_idx}, sample {i}: "
+                    f"depth_est={depth_est.shape}, prob={prob.shape}, expected 2D maps."
+                )
+
+            # create sub-folder
+            output_folder_view = os.path.join(output_folder, b_idx)
+            output_folder_view_depth_map = os.path.join(output_folder_view, "depth_est")
+            output_folder_view_depth_map_color = os.path.join(output_folder_view_depth_map, "color")
+            output_folder_view_prob = os.path.join(output_folder_view, "confidence")
+            output_folder_view_prob_color = os.path.join(output_folder_view_prob, "color")
+            mkdir_if_not_exist(output_folder_view)
+            mkdir_if_not_exist(output_folder_view_depth_map)
+            mkdir_if_not_exist(output_folder_view_depth_map_color)
+            mkdir_if_not_exist(output_folder_view_prob)
+            mkdir_if_not_exist(output_folder_view_prob_color)
+
+            # save result
+            save_pfm(os.path.join(output_folder_view_depth_map, f"{b_name}.pfm"), depth_est.astype(np.float32))
+            plt.imsave(os.path.join(output_folder_view_depth_map_color, f"{b_name}.png"), depth_est, format="png")
+            save_pfm(os.path.join(output_folder_view_prob, f"{b_name}.pfm"), prob.astype(np.float32))
+            plt.imsave(os.path.join(output_folder_view_prob_color, f"{b_name}.png"), prob, format="png")
+
+        first_name = str(sample['view_name'][0])
+        print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), first_name, time.time() - start_time, scalar_outputs))
 
         del image_outputs
     
