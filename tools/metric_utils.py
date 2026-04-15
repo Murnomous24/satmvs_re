@@ -74,23 +74,21 @@ def Threshold_metrics(depth_est, depth_gt, mask, thres):
 
 @make_nograd_func
 @compute_metrics_for_each_image
-def MAE_metrics(depth_est, depth_gt, mask):
+def MAE_metrics(depth_est, depth_gt, mask, thres=10.0):
     depth_est, depth_gt = depth_est[mask], depth_gt[mask]
-    if depth_est.numel() == 0:
-        return torch.tensor(0.0, device=depth_est.device)
-    
-    abs_diff = (depth_est - depth_gt).abs()
-    return torch.mean(abs_diff)
+    diff = (depth_est - depth_gt).abs()
+    mask2 = (diff < thres)
+    result = diff[mask2]
+    return torch.mean(result)
 
 @make_nograd_func
 @compute_metrics_for_each_image
-def RMSE_metrics(depth_est, depth_gt, mask):
+def RMSE_metrics(depth_est, depth_gt, mask, thres=10.0):
     depth_est, depth_gt = depth_est[mask], depth_gt[mask]
-    if depth_est.numel() == 0:
-        return torch.tensor(0.0, device=depth_est.device)
-    
-    square_diff = (depth_est - depth_gt) ** 2
-    return torch.sqrt(torch.mean(square_diff))
+    diff = (depth_est - depth_gt).abs()
+    mask2 = (diff < thres)
+    result = diff[mask2] ** 2
+    return torch.sqrt(torch.mean(result))
 
 @make_nograd_func
 @compute_metrics_for_each_image
