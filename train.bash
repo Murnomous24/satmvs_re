@@ -31,6 +31,6 @@ python train.py \
     --progress_mode="$PROGRESS_MODE" \
     --progress_log_freq=$PROGRESS_LOG_FREQ \
     --num_workers=$NUM_WORKERS \
-    --eta
+    --eta \
     # --train_loadckpt="$TRAIN_LOADCKPT" \
     # --resume=$RESUME

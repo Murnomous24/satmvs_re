@@ -24,7 +24,7 @@ parser.add_argument('--dataset_root', default = None, help = 'dataset root')
 parser.add_argument('--train_loadckpt', default = None, help = 'specific checkpoint file for resume training')
 parser.add_argument('--test_loadckpt', default = None, help = 'specific checkpoint file for test')
 parser.add_argument('--logdir', default = None, help = 'the folder save training logs')
-parser.add_argument('--resume', default = False, help = 'continue to train model in old checkpoint')
+parser.add_argument('--resume', action = 'store_true', help = 'continue to train model in old checkpoint')
 parser.add_argument('--batch_size', type = int, default = 1, help = "batch size")
 # mvs setting
 parser.add_argument('--view_num', type = int, default = 3, help = 'number of input view')
