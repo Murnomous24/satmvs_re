@@ -210,16 +210,16 @@ def rpc_warping(src_fea, src_rpc, ref_rpc, depth_values, coef):
         proj_xy = torch.stack((proj_x_norm, proj_y_norm), dim = 3) # [B, Ndepth, H * W, 2]
         grid = proj_xy.float() # TODO check unit
 
-        # warping feautre
-        warped_src_fea = F.grid_sample(
-            src_fea, 
-            grid.view(batch, num_depth * height, width, 2),
-            mode = 'bilinear',
-            padding_mode = 'zeros',
-            align_corners = True)
-        warped_src_fea = warped_src_fea.view(batch, channel, num_depth, height, width) # [B, C, Ndetph, H, W]
+    # warping feautre(that one need grad!!!)
+    warped_src_fea = F.grid_sample(
+        src_fea, 
+        grid.view(batch, num_depth * height, width, 2),
+        mode = 'bilinear',
+        padding_mode = 'zeros',
+        align_corners = True)
+    warped_src_fea = warped_src_fea.view(batch, channel, num_depth, height, width) # [B, C, Ndetph, H, W]
 
-        return warped_src_fea
+    return warped_src_fea
 
 # test code
 # if __name__ == "__main__":
