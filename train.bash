@@ -10,8 +10,9 @@ GPU_ID="0"
 BATCH_SIZE=1
 MIN_INTERVAL=0.5
 EPOCH=5
-PROGRESS_MODE="tqdm"        # options: tqdm | log
+PROGRESS_MODE="log"        # options: tqdm | log
 PROGRESS_LOG_FREQ=100
+NUM_WORKERS=8
 # TRAIN_LOADCKPT="/home/murph_dl/Paper_Re/SatMVS_Re/checkpoints/casmvs/rpc/20260113_192816/model_000227.ckpt"
 # RESUME=True
 
@@ -29,6 +30,7 @@ python train.py \
     --epochs=$EPOCH \
     --progress_mode="$PROGRESS_MODE" \
     --progress_log_freq=$PROGRESS_LOG_FREQ \
+    --num_workers=$NUM_WORKERS \
     --eta
     # --train_loadckpt="$TRAIN_LOADCKPT" \
     # --resume=$RESUME

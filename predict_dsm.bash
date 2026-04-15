@@ -7,14 +7,10 @@ OUTPUT_DIR="./dsm_results"
 GPU_ID="0"
 PROGRESS_MODE="tqdm"        # options: tqdm | log
 PROGRESS_LOG_FREQ=10
-
-# Avoid libgomp warnings when OMP_NUM_THREADS is unset or invalid in container environments.
-if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then
-    export OMP_NUM_THREADS=1
-fi
+NUM_WORKERS=8
 
 # Run prediction
-python predict_dsm.py \
+python -u predict_dsm.py \
     --config_file "dsm_config/config.json" \
     --info_root "$INFO_ROOT" \
     --model casmvs \
@@ -30,5 +26,6 @@ python predict_dsm.py \
     --gpu_id "$GPU_ID" \
     --progress_mode "$PROGRESS_MODE" \
     --progress_log_freq "$PROGRESS_LOG_FREQ" \
+    --num_workers "$NUM_WORKERS" \
     --workspace "$OUTPUT_DIR" \
     --eta

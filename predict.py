@@ -14,7 +14,6 @@ from dataset.data_io import save_pfm
 from tools.utils import *
 from dataset import find_dataset
 from networks.casmvs import *
-from networks.loss import casmvs_loss
 
 parser = argparse.ArgumentParser(description = "satmvs_re predicting file")
 # arguments option
@@ -40,6 +39,7 @@ parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'dep
 parser.add_argument('--summary_freq', type = int, default = 50, help = 'tensorboard summary frequency in prediction')
 parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
 parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
+parser.add_argument('--num_workers', type = int, default = 4, help = "dataloader worker count for prediction")
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
 
@@ -86,23 +86,13 @@ def predict_batch(model, sample, ndepths, dlossw=None):
         depth_final_gt = depth_gt_ms[f"stage{num_stage}"]
         mask_final = mask_ms[f"stage{num_stage}"]
 
-        # Keep metric set consistent with train.py (test_batch detailed_summary=True).
-        loss, depth_loss = casmvs_loss(
-            outputs,
-            depth_gt_ms,
-            mask_ms,
-            dlossw = [float(weight) for weight in dlossw.split(",") if weight] if dlossw is not None else None
-        )
-        scalar_outputs["loss"] = loss
-        scalar_outputs["depth_loss"] = depth_loss
         scalar_outputs["abs_depth_error"] = AbsDepthError_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
         
-        scalar_outputs["mae"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
-        scalar_outputs["rmse"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5)
+        scalar_outputs["MAE"] = MAE_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
+        scalar_outputs["RMSE"] = RMSE_metrics(depth_est, depth_final_gt, mask_final > 0.5, 250.0)
         scalar_outputs["threshold_1.0m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 1.0)
         scalar_outputs["threshold_2.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 2.5)
         scalar_outputs["threshold_7.5m_acc"] = Threshold_metrics(depth_est, depth_final_gt, mask_final > 0.5, 7.5)
-        scalar_outputs["completeness"] = Completeness_metrics(photometric_confidence, depth_final_gt, mask_final > 0.5)
 
     # wrap outputs
     image_outputs = {
@@ -123,6 +113,8 @@ def predict_cli(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
     if args.progress_log_freq <= 0:
         raise ValueError("--progress_log_freq must be > 0")
+    if args.num_workers < 0:
+        raise ValueError("--num_workers must be >= 0")
 
     print(
         "Predict CLI params: "
@@ -173,7 +165,7 @@ def predict_cli(args):
         pred_dataset,
         args.batch_size,
         shuffle = False,
-        num_workers = 4,
+        num_workers = args.num_workers,
         pin_memory = True,
         drop_last = False
     )
@@ -274,6 +266,11 @@ def predict_cli(args):
             if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), args.progress_log_freq):
                 print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
 
+    overall_step = len(pred_loader)
+    overall_metrics = avg_test_scalars.mean()
+    if len(overall_metrics) > 0:
+        save_scalars(logger, 'overall', overall_metrics, overall_step)
+
     logger.close()
     print(f"avg_test_scalars: {avg_test_scalars.mean()}")
     # write prediction metrics
@@ -291,6 +288,9 @@ def predict(
 ):
     if getattr(cfg, "progress_log_freq", 10) <= 0:
         raise ValueError("--progress_log_freq must be > 0")
+    pred_num_workers = int(getattr(cfg, "num_workers", 0))
+    if pred_num_workers < 0:
+        raise ValueError("--num_workers must be >= 0")
     if geo_model is None:
         geo_model = cfg.geo_model
     if cfg.geo_model != geo_model:
@@ -310,7 +310,7 @@ def predict(
         pred_dataset,
         cfg.batch_size,
         shuffle = False,
-        num_workers = 4,
+        num_workers = pred_num_workers,
         pin_memory = True,
         drop_last = False
     )
@@ -352,6 +352,7 @@ def predict(
     avg_test_scalars = DictAverageMeter()
     use_tqdm = _use_tqdm(getattr(cfg, "progress_mode", "tqdm"))
     pred_iter = tqdm(pred_loader, desc="Predict dsm", unit="batch") if use_tqdm else pred_loader
+    total_batches = len(pred_loader)
     for batch_idx, sample in enumerate(pred_iter):
         start_time = time.time()
 
@@ -396,8 +397,8 @@ def predict(
             plt.imsave(os.path.join(output_folder_view_prob_color, f"{b_name}.png"), prob, format="png")
 
         first_name = str(sample['view_name'][0])
-        if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), getattr(cfg, "progress_log_freq", 10)):
-            print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, len(pred_loader), first_name, time.time() - start_time, scalar_outputs))
+        if use_tqdm or _should_log_batch(batch_idx, total_batches, getattr(cfg, "progress_log_freq", 10)):
+            print("Iter {}/{}, {}, time = {:.3f}, metrics = {}".format(batch_idx, total_batches, first_name, time.time() - start_time, scalar_outputs))
 
         del image_outputs
     
