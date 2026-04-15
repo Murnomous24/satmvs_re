@@ -46,6 +46,7 @@ parser.add_argument('--summary_freq', type = int, default = 50, help = 'print an
 parser.add_argument('--save_freq', type = int, default = 1, help = 'save checkpoint frequency')
 parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
 parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
+parser.add_argument('--num_workers', type = int, default = 4, help = "dataloader worker count for prediction")
 # others setting
 parser.add_argument('--seed', type = int, default = 42, metavar = 'S', help = 'answer of universe')
 parser.add_argument('--gpu_id', type = str, default = "0")
@@ -106,7 +107,7 @@ train_loader = DataLoader(
     train_dataset,
     args.batch_size,
     shuffle = True,
-    num_workers = 4,
+    num_workers = 8,
     pin_memory = True,
     drop_last = True
 )
@@ -114,7 +115,7 @@ test_loader = DataLoader(
     test_dataset,
     args.batch_size,
     shuffle = False,
-    num_workers = 4,
+    num_workers = 8,
     pin_memory = True,
     drop_last = False
 )
@@ -203,6 +204,8 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     loss.backward()
     # TODO: each batch or each loop?
     optimizer.step()
+    # Step scheduler per batch to match iteration-level LR decay behavior.
+    lr_scheduler.step()
 
     # get metrices
     num_stage = len([int(depth) for depth in args.ndepths.split(",") if depth])
@@ -374,9 +377,6 @@ def train():
             del scalar_outputs, image_outputs
         save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")
-
-        # lr update
-        lr_scheduler.step()
 
         # write log
         record_path = os.path.join(cur_log_dir, 'train_record.txt')
