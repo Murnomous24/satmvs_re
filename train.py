@@ -51,7 +51,7 @@ parser.add_argument('--epochs', type = int, default = 30, help = 'number of epoc
 parser.add_argument('--lr', type = float, default = 0.001, help = 'learning rate')
 parser.add_argument('--lrepochs', type = str, default = '10,12,14:2', help = 'epoch index to downscale lr and downscale rate')
 parser.add_argument('--wd', type = float, default = 0.0, help = 'weight decay')
-parser.add_argument('--summary_freq', type = int, default = 50, help = 'print and save log frequency')
+parser.add_argument('--summary_freq', type = int, default = 50, help = 'train/test tensorboard summary frequency (unit: iteration steps)')
 parser.add_argument('--save_freq', type = int, default = 1, help = 'save checkpoint frequency')
 parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
 parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
@@ -428,7 +428,9 @@ def train():
             if bool_summary:
                 save_scalars(logger, 'test', scalar_outputs, eval_global_step)
                 save_images(logger, 'test', image_outputs, eval_global_step)
-            avg_test_scalars.update(scalar_outputs) # update scalars
+            # Use sample-count weighting so epoch metrics are invariant to batch size.
+            batch_size_cur = int(sample["images"].shape[0])
+            avg_test_scalars.update(scalar_outputs, weight = batch_size_cur)
             
             if use_tqdm:
                 test_iter.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")

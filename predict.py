@@ -37,7 +37,7 @@ parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
 parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage (for eval metrics)')
-parser.add_argument('--summary_freq', type = int, default = 50, help = 'tensorboard summary frequency in prediction')
+parser.add_argument('--summary_freq_samples', type = int, default = 50, help = 'tensorboard summary frequency in prediction (unit: samples)')
 parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
 parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
 parser.add_argument('--num_workers', type = int, default = 4, help = "dataloader worker count for prediction")
@@ -125,6 +125,8 @@ def predict_cli(args):
         raise ValueError("--progress_log_freq must be > 0")
     if args.num_workers < 0:
         raise ValueError("--num_workers must be >= 0")
+    if args.summary_freq_samples <= 0:
+        raise ValueError("--summary_freq_samples must be > 0")
 
     print(
         "Predict CLI params: "
@@ -212,6 +214,9 @@ def predict_cli(args):
     model.load_state_dict(state_dict['model'])
 
     avg_test_scalars = DictAverageMeter()
+    interval_scalars = DictAverageMeter()
+    processed_samples = 0
+    next_log_step = args.summary_freq_samples
     use_tqdm = _use_tqdm(args.progress_mode)
     pred_iter = tqdm(pred_loader, desc="Predict", unit="batch") if use_tqdm else pred_loader
     for batch_idx, sample in enumerate(pred_iter):
@@ -220,14 +225,19 @@ def predict_cli(args):
         b_name = str(sample['view_name'][0])
 
         image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths, args.dlossw)
+        batch_size_cur = int(sample["images"].shape[0])
         if len(scalar_outputs) > 0:
-            avg_test_scalars.update(scalar_outputs)
+            avg_test_scalars.update(scalar_outputs, weight=batch_size_cur)
+            interval_scalars.update(scalar_outputs, weight=batch_size_cur)
 
-        global_step = batch_idx
-        if global_step % args.summary_freq == 0:
-            if len(scalar_outputs) > 0:
-                save_scalars(logger, 'predict', scalar_outputs, global_step)
-            save_images(logger, 'predict', image_outputs, global_step)
+        processed_samples += batch_size_cur
+        while processed_samples >= next_log_step:
+            interval_metrics = interval_scalars.mean()
+            if len(interval_metrics) > 0:
+                save_scalars(logger, 'predict', interval_metrics, next_log_step)
+            save_images(logger, 'predict', image_outputs, next_log_step)
+            interval_scalars = DictAverageMeter()
+            next_log_step += args.summary_freq_samples
 
         torch.cuda.synchronize()
         batch_time = time.perf_counter() - start_time
@@ -276,7 +286,7 @@ def predict_cli(args):
             if use_tqdm or _should_log_batch(batch_idx, len(pred_loader), args.progress_log_freq):
                 print(f'Iter {batch_idx}/{len(pred_loader)} (Batch {i}/{batch_size}), Saved: {depth_path}')
 
-    overall_step = len(pred_loader)
+    overall_step = processed_samples
     overall_metrics = avg_test_scalars.mean()
     if len(overall_metrics) > 0:
         save_scalars(logger, 'overall', overall_metrics, overall_step)
@@ -367,8 +377,9 @@ def predict(
 
         # build result
         image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths, getattr(cfg, "dlossw", None))
+        batch_size_cur = int(sample["images"].shape[0])
         if len(scalar_outputs) > 0:
-            avg_test_scalars.update(scalar_outputs)
+            avg_test_scalars.update(scalar_outputs, weight=batch_size_cur)
 
         depth_est_batch = tensor2numpy(image_outputs["depth_est"])
         prob_batch = tensor2numpy(image_outputs["photometric_confidence"])

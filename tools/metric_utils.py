@@ -238,23 +238,31 @@ def save_images(logger, mode, images_dict, global_step):
 class DictAverageMeter(object):
     def __init__(self):
         self.data = {}
-        self.count = 0
+        self.weight_sum = 0.0
 
-    def update(self, new_input):
-        self.count += 1
+    def update(self, new_input, weight=1.0):
+        weight = float(weight)
+        if weight <= 0:
+            return
+
         if len(self.data) == 0:
             for k, v in new_input.items():
                 if not isinstance(v, float):
                     raise NotImplementedError("invalid data {}: {}".format(k, type(v)))
-                self.data[k] = v
+                self.data[k] = v * weight
         else:
             for k, v in new_input.items():
                 if not isinstance(v, float):
                     raise NotImplementedError("invalid data {}: {}".format(k, type(v)))
-                self.data[k] += v
+                self.data[k] += v * weight
+
+        self.weight_sum += weight
 
     def mean(self):
-        return {k: v / self.count for k, v in self.data.items()}
+        if self.weight_sum <= 0:
+            return {}
+        return {k: v / self.weight_sum for k, v in self.data.items()}
+
 
 def unnormalize_image(img_tensor):
     img = tensor2numpy(img_tensor) # [3, H, W]
