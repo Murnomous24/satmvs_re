@@ -207,7 +207,7 @@ def predict_cli(args):
         saved_models = sorted(saved_models, key=lambda x: int(x.split('_')[1].split(".")[0]))
         loadckpt = os.path.join(loadckpt, saved_models[-1])
 
-    print(f"load checkpoint from {loadckpt} for resume training")
+    print(f"load checkpoint from {loadckpt} for predicting")
     state_dict = torch.load(loadckpt)
     model.load_state_dict(state_dict['model'])
 
