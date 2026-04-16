@@ -10,9 +10,18 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from tools.utils import *
+from tools.train_resume_utils import (
+    StatefulRandomSampler,
+    capture_rng_states,
+    require_ckpt_keys,
+    restore_rng_states,
+    seed_everything,
+    seed_worker,
+)
 from dataset import find_dataset
 from networks.casmvs import *
 from networks.loss import *
+
 
 parser = argparse.ArgumentParser(description = "satmvs_re training file")
 # arguments option
@@ -56,6 +65,7 @@ args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 if args.progress_log_freq <= 0:
     raise ValueError("--progress_log_freq must be > 0")
+seed_everything(args.seed)
 
 # get dataset path
 if args.dataset_root is None:
@@ -103,21 +113,28 @@ test_dataset = mvsdataset(
     args.view_num,
     ref_view = args.ref_view
 )
+train_loader_generator = torch.Generator()
+train_loader_generator.manual_seed(args.seed)
+train_sampler = StatefulRandomSampler(train_dataset, seed = args.seed)
 train_loader = DataLoader(
     train_dataset,
     args.batch_size,
-    shuffle = True,
-    num_workers = 8,
+    shuffle = False,
+    sampler = train_sampler,
+    num_workers = args.num_workers,
     pin_memory = True,
-    drop_last = True
+    drop_last = True,
+    worker_init_fn = seed_worker,
+    generator = train_loader_generator
 )
 test_loader = DataLoader(
     test_dataset,
     args.batch_size,
     shuffle = False,
-    num_workers = 8,
+    num_workers = args.num_workers,
     pin_memory = True,
-    drop_last = False
+    drop_last = False,
+    worker_init_fn = seed_worker
 )
 
 # mvs model
@@ -153,34 +170,73 @@ optimizer = optim.RMSprop(
 
 # load checkpoint if needed
 start_epoch = 1
+global_step = 0
+resume_step_in_epoch = 0
+resume_scheduler_state = None
+resume_sampler_state = None
 if(args.mode == "train" and args.resume):
     print(f"load checkpoint from {args.train_loadckpt}")
     loadckpt = args.train_loadckpt
     if os.path.isdir(loadckpt):
         saved_models = [file for file in os.listdir(loadckpt) if file.endswith(".ckpt")]
+        if not saved_models:
+            raise FileNotFoundError(f"no checkpoint file found in directory: {loadckpt}")
         saved_models = sorted(saved_models, key=lambda x: int(x.split('_')[1].split(".")[0]))
         loadckpt = os.path.join(loadckpt, saved_models[-1])
+    elif not os.path.isfile(loadckpt):
+        raise FileNotFoundError(f"checkpoint path does not exist: {loadckpt}")
 
     print(f"load checkpoint from {loadckpt} for resume training")
-    state_dict = torch.load(loadckpt)
+    state_dict = torch.load(loadckpt, map_location = "cpu")
+    require_ckpt_keys(
+        state_dict,
+        [
+            "epoch",
+            "global_step",
+            "step_in_epoch",
+            "model",
+            "optimizer",
+            "scheduler",
+            "sampler_state",
+            "rng_torch",
+            "rng_cuda",
+            "rng_numpy",
+            "rng_python",
+            "data_generator_state"
+        ],
+        loadckpt
+    )
     model.load_state_dict(state_dict['model'])
     optimizer.load_state_dict(state_dict['optimizer'])
-    start_epoch = state_dict['epoch'] + 1
+    resume_step_in_epoch = int(state_dict['step_in_epoch'])
+    if resume_step_in_epoch > 0:
+        start_epoch = int(state_dict['epoch'])
+    else:
+        start_epoch = int(state_dict['epoch']) + 1
+    global_step = state_dict['global_step']
+    resume_scheduler_state = state_dict['scheduler']
+    resume_sampler_state = state_dict['sampler_state']
+    train_loader_generator.set_state(state_dict["data_generator_state"])
+    restore_rng_states(state_dict)
 elif args.mode == "test":
     assert args.test_loadckpt is not None, f"test need 'test_loadckpt', but get none"
     print(f"load checkpoint from {args.test_loadckpt}")
     
     loadckpt = args.test_loadckpt
+    if os.path.isdir(loadckpt):
+        saved_models = [file for file in os.listdir(loadckpt) if file.endswith(".ckpt")]
+        if not saved_models:
+            raise FileNotFoundError(f"no checkpoint file found in directory: {loadckpt}")
+        saved_models = sorted(saved_models, key=lambda x: int(x.split('_')[1].split(".")[0]))
+        loadckpt = os.path.join(loadckpt, saved_models[-1])
+    elif not os.path.isfile(loadckpt):
+        raise FileNotFoundError(f"checkpoint path does not exist: {loadckpt}")
     print(f"load checkpoint from {loadckpt} for test")
-    state_dict = torch.load(loadckpt)
+    state_dict = torch.load(loadckpt, map_location = "cpu")
     model.load_state_dict(state_dict['model'])
 
-# before training, set seed
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
-
 # train / test on one batch
-def train_batch(sample, lr_scheduler, detailed_summary = False):
+def train_batch(sample, detailed_summary = False):
     model.train()
     optimizer.zero_grad()
 
@@ -204,8 +260,8 @@ def train_batch(sample, lr_scheduler, detailed_summary = False):
     loss.backward()
     # TODO: each batch or each loop?
     optimizer.step()
-    # Step scheduler per batch to match iteration-level LR decay behavior.
-    lr_scheduler.step()
+    # # Step scheduler per batch to match iteration-level LR decay behavior.
+    # lr_scheduler.step()
 
     # get metrices
     num_stage = len([int(depth) for depth in args.ndepths.split(",") if depth])
@@ -300,26 +356,37 @@ def train():
         optimizer,
         milestones,
         lr_gamma,
-        last_epoch = start_epoch - 1
+        last_epoch = -1
     )
+    if args.resume:
+        lr_scheduler.load_state_dict(resume_scheduler_state)
+        train_sampler.load_state_dict(resume_sampler_state)
+
+    current_global_step = global_step
 
     # Include args.epochs itself so --epochs=N runs N epochs (1..N by default).
     for epoch_idx in range(start_epoch, args.epochs + 1):
         print(f"epoch {epoch_idx}")
+        train_sampler.set_epoch(epoch_idx)
 
-        global_step = len(train_loader) * epoch_idx # batch * epoch TODO right ?
+        step_in_epoch_start = 0
+        if args.resume and epoch_idx == start_epoch and resume_step_in_epoch > 0:
+            step_in_epoch_start = resume_step_in_epoch
+            print(f"resume from epoch {epoch_idx}, step_in_epoch {step_in_epoch_start}")
+        train_sampler.set_start_step(step_in_epoch_start, args.batch_size)
 
         # train
         use_tqdm = args.progress_mode == "tqdm"
-        train_iter = tqdm(enumerate(train_loader), total = len(train_loader), desc = f"Train {epoch_idx}/{args.epochs}", unit = "batch") if use_tqdm else enumerate(train_loader)
+        train_total_batch = max(len(train_loader) - step_in_epoch_start, 0)
+        train_enum = enumerate(train_loader, start = step_in_epoch_start)
+        train_iter = tqdm(train_enum, total = train_total_batch, desc = f"Train {epoch_idx}/{args.epochs}", unit = "batch") if use_tqdm else train_enum
         for batch_idx, sample in train_iter:
             start_time = time.perf_counter()
-            global_step = len(train_loader) * epoch_idx + batch_idx
-            bool_summary = global_step % args.summary_freq == 0
+            current_global_step += 1
+            bool_summary = current_global_step % args.summary_freq == 0
             
             loss, scalar_outputs, image_outputs = train_batch(
                 sample,
-                lr_scheduler,
                 detailed_summary = bool_summary
             )
             
@@ -327,8 +394,8 @@ def train():
             batch_time = time.perf_counter() - start_time
 
             if bool_summary:
-                save_scalars(logger, 'train', scalar_outputs, global_step)
-                save_images(logger, 'train', image_outputs, global_step)
+                save_scalars(logger, 'train', scalar_outputs, current_global_step)
+                save_images(logger, 'train', image_outputs, current_global_step)
             if use_tqdm:
                 train_iter.set_postfix(loss = f"{loss:.4f}", time = f"{batch_time:.3f}s")
                 tqdm.write(f'epoch {epoch_idx}/{args.epochs}, iter {batch_idx}/{len(train_loader)}, train loss = {loss}, time = {batch_time}, train_result = {scalar_outputs}')
@@ -347,8 +414,8 @@ def train():
         test_iter = tqdm(enumerate(test_loader), total = len(test_loader), desc = f"Test {epoch_idx}/{args.epochs}", unit = "batch") if use_tqdm else enumerate(test_loader)
         for batch_idx, sample in test_iter:
             start_time = time.perf_counter()
-            global_step = len(train_loader) * epoch_idx + batch_idx
-            bool_summary = global_step % args.summary_freq == 0
+            eval_global_step = current_global_step + batch_idx + 1
+            bool_summary = eval_global_step % args.summary_freq == 0
 
             loss, scalar_outputs, image_outputs = test_batch(
                 sample,
@@ -359,8 +426,8 @@ def train():
             batch_time = time.perf_counter() - start_time
 
             if bool_summary:
-                save_scalars(logger, 'test', scalar_outputs, global_step)
-                save_images(logger, 'test', image_outputs, global_step)
+                save_scalars(logger, 'test', scalar_outputs, eval_global_step)
+                save_images(logger, 'test', image_outputs, eval_global_step)
             avg_test_scalars.update(scalar_outputs) # update scalars
             
             if use_tqdm:
@@ -375,7 +442,7 @@ def train():
                         f"loss={loss:.4f}, time={batch_time:.3f}s, metrics={scalar_outputs}"
                     )
             del scalar_outputs, image_outputs
-        save_scalars(logger, 'fulltest', avg_test_scalars.mean(), global_step)
+        save_scalars(logger, 'fulltest', avg_test_scalars.mean(), current_global_step)
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")
 
         # write log
@@ -384,13 +451,26 @@ def train():
         with open(record_path, "a+", encoding="utf-8") as f:
             f.write(f"Epoch {epoch_idx}: {current_avg_metrics}\n")
 
+        # Keep epoch-level semantics for lrepoch milestones.
+        lr_scheduler.step()
+
         # save checkpoint
         if (epoch_idx + 1) % args.save_freq == 0:
+            rng_states = capture_rng_states()
             torch.save(
                 {
                     'epoch': epoch_idx,
+                    'global_step': current_global_step,
+                    'step_in_epoch': 0,
                     'model': model.state_dict(),
-                    'optimizer': optimizer.state_dict()
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': lr_scheduler.state_dict(),
+                    'sampler_state': train_sampler.state_dict(),
+                    'rng_torch': rng_states['rng_torch'],
+                    'rng_cuda': rng_states['rng_cuda'],
+                    'rng_numpy': rng_states['rng_numpy'],
+                    'rng_python': rng_states['rng_python'],
+                    'data_generator_state': train_loader_generator.get_state()
                 },
                 f"{cur_log_dir}/model_{epoch_idx:0>6}.ckpt"
             )

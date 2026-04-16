@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+import glob
 import torch
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
@@ -48,6 +49,15 @@ def _use_tqdm(progress_mode):
 
 def _should_log_batch(batch_idx, total_batches, log_freq):
     return batch_idx == 0 or (batch_idx + 1) == total_batches or ((batch_idx + 1) % log_freq == 0)
+
+def _clear_tensorboard_events(tb_log_dir):
+    event_paths = sorted(glob.glob(os.path.join(tb_log_dir, "events.out.tfevents*")))
+    removed = 0
+    for event_path in event_paths:
+        if os.path.isfile(event_path):
+            os.remove(event_path)
+            removed += 1
+    print(f"cleared {removed} old tensorboard event file(s) in {tb_log_dir}")
 
 @make_nograd_func
 def predict_batch(model, sample, ndepths, dlossw=None):
@@ -150,6 +160,7 @@ def predict_cli(args):
 
     tb_log_dir = os.path.join(pred_log_dir, "tensorboard")
     os.makedirs(tb_log_dir, exist_ok=True)
+    _clear_tensorboard_events(tb_log_dir)
     logger = SummaryWriter(tb_log_dir)
     print(f"tensorboard directory: {tb_log_dir}")
 
@@ -169,7 +180,6 @@ def predict_cli(args):
         pin_memory = True,
         drop_last = False
     )
-
     # mvs model
     if args.model == "casmvs":
         model = CascadeMVSNet(
@@ -272,10 +282,9 @@ def predict_cli(args):
         save_scalars(logger, 'overall', overall_metrics, overall_step)
 
     logger.close()
-    print(f"avg_test_scalars: {avg_test_scalars.mean()}")
-    # write prediction metrics
-    record_path = os.path.join(pred_log_dir, 'predict_record.txt')
     current_avg_metrics = avg_test_scalars.mean()
+    print(f"avg_test_scalars: {current_avg_metrics}")
+    record_path = os.path.join(pred_log_dir, 'predict_record.txt')
     with open(record_path, "a+", encoding="utf-8") as f:
         f.write(f"Predict Metrics: {current_avg_metrics}\n")
 
@@ -402,10 +411,9 @@ def predict(
 
         del image_outputs
     
-    print(f"avg_test_scalars: {avg_test_scalars.mean()}")
-    # write prediction metrics
-    record_path = os.path.join(output_path, 'predict_record.txt')
     current_avg_metrics = avg_test_scalars.mean()
+    print(f"avg_test_scalars: {current_avg_metrics}")
+    record_path = os.path.join(output_path, 'predict_record.txt')
     with open(record_path, "a+", encoding="utf-8") as f:
         f.write(f"Predict Metrics: {current_avg_metrics}\n")
 
