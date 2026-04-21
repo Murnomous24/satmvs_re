@@ -25,3 +25,4 @@ dependencies:
     - opencv-python==4.9.0.80
     - requests==2.32.5
     - networkx==3.4.2
+    - PyWavelets==1.8.0

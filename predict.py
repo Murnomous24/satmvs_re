@@ -29,6 +29,7 @@ parser.add_argument('--batch_size', type = int, default = 1, help = "batch size"
 # mvs setting
 parser.add_argument('--view_num', type = int, default = 3, help = 'number of input view')
 parser.add_argument('--ref_view', type = int, default = 2, help = 'index of reference view')
+parser.add_argument('--aux_channel', type = str, default = "gray", choices = ["gray", "gabor", "dwt"], help = "auxiliary input channel mode")
 # cascade setting
 parser.add_argument('--ndepths', type = str, default = "64,32,8", help = "number of depths")
 parser.add_argument('--min_interval', type = float, default = 2.5, help = "min interval of each depth plane")
@@ -36,13 +37,20 @@ parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help =
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
-parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage (for eval metrics)')
+parser.add_argument('--group_cor_dim', type = str, default = "8,4,4", help = 'group correlation dim for each stage when eta is enabled')
 parser.add_argument('--summary_freq_samples', type = int, default = 50, help = 'tensorboard summary frequency in prediction (unit: samples)')
 parser.add_argument('--progress_mode', type = str, default = "tqdm", choices = ["tqdm", "log"], help = "progress display mode")
 parser.add_argument('--progress_log_freq', type = int, default = 10, help = "log frequency in log progress mode (batches)")
 parser.add_argument('--num_workers', type = int, default = 4, help = "dataloader worker count for prediction")
 # others setting
 parser.add_argument('--gpu_id', type = str, default = "0")
+
+def parse_stage_ints(value_str, ndepths_str, value_name):
+    values = [int(value) for value in value_str.split(",") if value]
+    expected_len = len([int(depth) for depth in ndepths_str.split(",") if depth])
+    if len(values) != expected_len:
+        raise ValueError(f"{value_name} length must match number of stages, get {len(values)} vs {expected_len}")
+    return values
 
 def _use_tqdm(progress_mode):
     return progress_mode == "tqdm"
@@ -60,7 +68,7 @@ def _clear_tensorboard_events(tb_log_dir):
     print(f"cleared {removed} old tensorboard event file(s) in {tb_log_dir}")
 
 @make_nograd_func
-def predict_batch(model, sample, ndepths, dlossw=None):
+def predict_batch(model, sample, ndepths):
     model.eval()
 
     # run multi-stage mvs pipeline
@@ -131,7 +139,7 @@ def predict_cli(args):
     print(
         "Predict CLI params: "
         f"model={args.model}, geo_model={args.geo_model}, view_num={args.view_num}, ref_view={args.ref_view}, "
-        f"batch_size={args.batch_size}, ndepths={args.ndepths}, min_interval={args.min_interval}, "
+        f"aux_channel={args.aux_channel}, batch_size={args.batch_size}, ndepths={args.ndepths}, min_interval={args.min_interval}, "
         f"depth_inter_ratio={args.depth_inter_ratio}, cr_base_chs={args.cr_base_chs}, gpu_id={args.gpu_id}"
     )
 
@@ -172,7 +180,8 @@ def predict_cli(args):
         pred_path,
         "test", # TODO: modify pred dataset mode
         args.view_num,
-        ref_view = args.ref_view
+        ref_view = args.ref_view,
+        aux_mode = args.aux_channel
     )
     pred_loader = DataLoader(
         pred_dataset,
@@ -192,7 +201,9 @@ def predict_cli(args):
             depth_intervals_ratio = [float(interval) for interval in args.depth_inter_ratio.split(",") if interval],
             cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch],
             eta = args.eta,
-            attn_temp = args.attn_temp
+            attn_temp = args.attn_temp,
+            group_cor_dim = parse_stage_ints(args.group_cor_dim, args.ndepths, "group_cor_dim"),
+            aux_mode = args.aux_channel
         )
         print("use CascadeMVSNet model")
     else:
@@ -224,7 +235,7 @@ def predict_cli(args):
         b_idx = str(sample['view_idx'][0])
         b_name = str(sample['view_name'][0])
 
-        image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths, args.dlossw)
+        image_outputs, scalar_outputs = predict_batch(model, sample, args.ndepths)
         batch_size_cur = int(sample["images"].shape[0])
         if len(scalar_outputs) > 0:
             avg_test_scalars.update(scalar_outputs, weight=batch_size_cur)
@@ -323,7 +334,8 @@ def predict(
         output_path,
         "pred",
         view_num,
-        depth_range = depth_range
+        depth_range = depth_range,
+        aux_mode = getattr(cfg, "aux_channel", "gray")
     )
     pred_loader = DataLoader(
         pred_dataset,
@@ -345,7 +357,9 @@ def predict(
             depth_intervals_ratio = [float(interval) for interval in cfg.depth_inter_ratio.split(",") if interval],
             cr_base_chs = [int(ch) for ch in cfg.cr_base_chs.split(",") if ch],
             eta = cfg.eta,
-            attn_temp = cfg.attn_temp
+            attn_temp = cfg.attn_temp,
+            group_cor_dim = parse_stage_ints(cfg.group_cor_dim, cfg.ndepths, "group_cor_dim"),
+            aux_mode = getattr(cfg, "aux_channel", "gray")
         )
         print(f"use CascadeMVSNet model")
     else:
@@ -376,7 +390,7 @@ def predict(
         start_time = time.time()
 
         # build result
-        image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths, getattr(cfg, "dlossw", None))
+        image_outputs, scalar_outputs = predict_batch(model, sample, cfg.ndepths)
         batch_size_cur = int(sample["images"].shape[0])
         if len(scalar_outputs) > 0:
             avg_test_scalars.update(scalar_outputs, weight=batch_size_cur)

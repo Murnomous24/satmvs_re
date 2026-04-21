@@ -22,6 +22,7 @@ parser.add_argument('--interval_scale', type=float, default=1, help='the number 
 parser.add_argument('--batch_size', type=int, default=1, help='predict batch size')
 parser.add_argument('--adaptive_scaling', type=bool, default=True,
                     help='Let image size to fit the network, including scaling and cropping')
+parser.add_argument('--aux_channel', type=str, default='gray', choices=['gray', 'gabor', 'dwt'], help='auxiliary input channel mode')
 
 # Cascade parameters
 parser.add_argument('--share_cr', action='store_true', help='whether share the cost volume regularization')

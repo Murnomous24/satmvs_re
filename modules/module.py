@@ -1,6 +1,10 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from modules.gabor import GaborLayer
 
 # build depth regression from probability cost volume
 def depth_regression(prob, depth_values):
@@ -170,16 +174,23 @@ class FeatureNet(nn.Module):
             base_channels,
             num_stage = 3,
             stride = 4,
-            arch_mode = "unet"
+            arch_mode = "unet",
+            aux_mode = "gray"
     ):
         super().__init__()
         
         assert arch_mode in ["unet", "fpn"], f"mode must be 'unet' or 'fpn', but get {arch_mode}"
+        assert aux_mode in ["gray", "gabor", "dwt"], f"aux_mode must be 'gray', 'gabor' or 'dwt', but get {aux_mode}"
         
         self.arch_mode = arch_mode
         self.stride = stride
         self.base_channels = base_channels
         self.num_stage = num_stage
+        self.aux_mode = aux_mode
+        self.use_gabor = aux_mode == "gabor"
+
+        if self.use_gabor:
+            self.gabor = GaborLayer(orientations = [0.0, math.pi / 2.0], kernel_size = 7)
 
         # network
         self.conv0 = nn.Sequential(
@@ -238,6 +249,10 @@ class FeatureNet(nn.Module):
 
     def forward(self, x):
         # print("featurenet forward 1: start forward")
+        if self.use_gabor:
+            x_gray = x[:, 0:1, :, :]
+            gabor_out = self.gabor(x_gray)
+            x = torch.cat([x_gray, gabor_out], dim = 1)
         conv0 = self.conv0(x)
         conv1 = self.conv1(conv0)
         conv2 = self.conv2(conv1)

@@ -9,6 +9,18 @@ from modules.depth_range import *
 
 Align_Corners_Range = False # TODO: what
 
+def _normalize_group_cor_dims(group_cor_dim, num_stage):
+    if isinstance(group_cor_dim, int):
+        return [group_cor_dim] * num_stage
+    if isinstance(group_cor_dim, (list, tuple)):
+        group_dims = [int(dim) for dim in group_cor_dim]
+        if len(group_dims) != num_stage:
+            raise ValueError(
+                f"casmvs: group_cor_dim length must match num_stage, get {len(group_dims)} vs {num_stage}"
+            )
+        return group_dims
+    raise TypeError(f"casmvs: unsupported group_cor_dim type: {type(group_cor_dim)}")
+
 class DepthNet(nn.Module):
     def __init__(self):
         super(DepthNet, self).__init__()
@@ -34,6 +46,10 @@ class DepthNet(nn.Module):
         ref_proj, src_projs = proj_matrices[0], proj_matrices[1:] # ref_proj: [B, 4, 4]
 
         if eta:
+            if ref_fea.shape[1] % group_cor_dim != 0:
+                raise ValueError(
+                    f"casmvs: feature channels {ref_fea.shape[1]} must be divisible by group_cor_dim {group_cor_dim}"
+                )
             ref_volume = ref_fea.unsqueeze(2).repeat(1, 1, num_depth, 1, 1) # [B, C, Ndepth, H, W]
             cor_weight_sum = 1e-8
             cor_feats = 0
@@ -121,7 +137,9 @@ class DepthNet(nn.Module):
         # refine TODO
         return {
             "depth": depth,
-            "photometric_confidence": photometric_confidence
+            "photometric_confidence": photometric_confidence,
+            "prob_volume": prob_volume,
+            "depth_hypo": depth_values,
         }
         
 class CascadeMVSNet(nn.Module):
@@ -138,7 +156,8 @@ class CascadeMVSNet(nn.Module):
             cr_base_chs = [8, 8, 8],
             eta = False,
             attn_temp = 1.0,
-            group_cor_dim = 8
+            group_cor_dim = 8,
+            aux_mode = "gray"
     ):
         super(CascadeMVSNet, self).__init__()
         
@@ -154,7 +173,8 @@ class CascadeMVSNet(nn.Module):
         self.min_interval = min_interval
         self.eta = eta
         self.attn_temp = attn_temp
-        self.group_cor_dim = group_cor_dim
+        self.group_cor_dim = _normalize_group_cor_dims(group_cor_dim, self.num_stage)
+        self.aux_mode = aux_mode
         self.stage_infos = {
             "stage1": { "scale": 4.0 },
             "stage2": { "scale": 2.0 },
@@ -167,17 +187,21 @@ class CascadeMVSNet(nn.Module):
             base_channels = 8, 
             stride = 4,
             num_stage = self.num_stage,
-            arch_mode = self.arch_mode
+            arch_mode = self.arch_mode,
+            aux_mode = self.aux_mode
         )
+        if self.share_cr and self.eta and len(set(self.group_cor_dim)) != 1:
+            raise ValueError("casmvs: share_cr with eta requires identical group_cor_dim across all stages")
+
         if self.share_cr:
             self.cost_regularization = CostRegNet(
-                in_channels = self.group_cor_dim if self.eta else self.feature.out_channels[0], # Assuming same channel for share_cr or using first
+                in_channels = self.group_cor_dim[0] if self.eta else self.feature.out_channels[0],
                 base_channels = 8
             )
         else:
             self.cost_regularization = nn.ModuleList(
                 [CostRegNet(
-                    in_channels = self.group_cor_dim if self.eta else self.feature.out_channels[index],
+                    in_channels = self.group_cor_dim[index] if self.eta else self.feature.out_channels[index],
                     base_channels = self.cr_base_chs[index]
                 ) for index in range (self.num_stage)]
             )
@@ -247,7 +271,7 @@ class CascadeMVSNet(nn.Module):
                 self.geo_model,
                 eta = self.eta,
                 attn_temp = self.attn_temp,
-                group_cor_dim = self.group_cor_dim
+                group_cor_dim = self.group_cor_dim[index]
             )
 
             last_depth = output_stage['depth']

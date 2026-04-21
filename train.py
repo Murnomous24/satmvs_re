@@ -38,6 +38,7 @@ parser.add_argument('--batch_size', type = int, default = 1, help = "batch size"
 # mvs setting
 parser.add_argument('--view_num', type = int, default = 3, help = 'number of input view')
 parser.add_argument('--ref_view', type = int, default = 2, help = 'index of reference view')
+parser.add_argument('--aux_channel', type = str, default = "gray", choices = ["gray", "gabor", "dwt"], help = "auxiliary input channel mode")
 # cascade setting
 parser.add_argument('--ndepths', type = str, default = "64,32,8", help = "number of depths")
 parser.add_argument('--min_interval', type = float, default = 2.5, help = "min interval of each depth plane")
@@ -53,6 +54,7 @@ parser.add_argument('--dds_sigma', type = float, default = 0.0, help = 'gaussian
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
+parser.add_argument('--group_cor_dim', type = str, default = "8,4,4", help = 'group correlation dim for each stage when eta is enabled')
 # training setting
 parser.add_argument('--epochs', type = int, default = 30, help = 'number of epochs of training')
 parser.add_argument('--lr', type = float, default = 0.001, help = 'learning rate')
@@ -73,6 +75,13 @@ os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 if args.progress_log_freq <= 0:
     raise ValueError("--progress_log_freq must be > 0")
 seed_everything(args.seed)
+
+def parse_stage_ints(value_str, value_name):
+    values = [int(value) for value in value_str.split(",") if value]
+    expected_len = len([int(depth) for depth in args.ndepths.split(",") if depth])
+    if len(values) != expected_len:
+        raise ValueError(f"{value_name} length must match number of stages, get {len(values)} vs {expected_len}")
+    return values
 
 # get dataset path
 if args.dataset_root is None:
@@ -112,13 +121,15 @@ train_dataset = mvsdataset(
     train_path,
     "train",
     args.view_num,
-    ref_view = args.ref_view
+    ref_view = args.ref_view,
+    aux_mode = args.aux_channel
 )
 test_dataset = mvsdataset(
     test_path,
     "test",
     args.view_num,
-    ref_view = args.ref_view
+    ref_view = args.ref_view,
+    aux_mode = args.aux_channel
 )
 train_loader_generator = torch.Generator()
 train_loader_generator.manual_seed(args.seed)
@@ -155,7 +166,9 @@ if args.model == "casmvs":
         depth_intervals_ratio = [float(interval) for interval in args.depth_inter_ratio.split(",") if interval],
         cr_base_chs = [int(ch) for ch in args.cr_base_chs.split(",") if ch],
         eta = args.eta,
-        attn_temp = args.attn_temp
+        attn_temp = args.attn_temp,
+        group_cor_dim = parse_stage_ints(args.group_cor_dim, "group_cor_dim"),
+        aux_mode = args.aux_channel
     )
     print(f"use CascadeMVSNet model")
 else:
@@ -263,12 +276,14 @@ def format_run_header():
         f"  batch_size: {args.batch_size}",
         f"  view_num: {args.view_num}",
         f"  ref_view: {args.ref_view}",
+        f"  aux_channel: {args.aux_channel}",
         f"  ndepths: {[int(depth) for depth in args.ndepths.split(',') if depth]}",
         f"  min_interval: {args.min_interval}",
         f"  depth_inter_ratio: {[float(interval) for interval in args.depth_inter_ratio.split(',') if interval]}",
         f"  cr_base_chs: {[int(ch) for ch in args.cr_base_chs.split(',') if ch]}",
         f"  eta: {args.eta}",
         f"  attn_temp: {args.attn_temp}",
+        f"  group_cor_dim: {parse_stage_ints(args.group_cor_dim, 'group_cor_dim')}",
         f"  epochs: {args.epochs}",
         f"  seed: {args.seed}",
         f"  gpu_id: {args.gpu_id}",

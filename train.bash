@@ -9,10 +9,12 @@ GEO_MODEL="rpc"
 GPU_ID="0"
 BATCH_SIZE=1
 MIN_INTERVAL=0.5
+AUX_CHANNEL="gray"         # options: gray | gabor | dwt
 EPOCH=5
 PROGRESS_MODE="log"        # options: tqdm | log
 PROGRESS_LOG_FREQ=100
 NUM_WORKERS=8
+ATTN_TEMP="1.0"
 
 # Loss config
 LOSS_TYPE="casmvs"         # options: casmvs | entropy | casmvs_entropy | casmvs_dds | entropy_dds
@@ -23,6 +25,7 @@ DDSLW="0.5,1.0,2.0"        # used by casmvs_dds
 DDS_WEIGHT="0.1"          # used by casmvs_dds
 DDS_NUM_BINS="32"          # used by casmvs_dds
 DDS_SIGMA="0.0"            # <=0 means auto
+GROUP_COR_DIM="8,4,4"     # used by eta
 
 # Optional resume config
 TRAIN_LOADCKPT=""
@@ -30,8 +33,9 @@ RESUME="false"
 
 echo "Starting SatMVS training:"
 echo "  Model=$MODEL, Geo=$GEO_MODEL, GSD=$MIN_INTERVAL"
+echo "  AuxChannel=$AUX_CHANNEL"
 echo "  LossType=$LOSS_TYPE, dlossw=$DLOSSW, elossw=$ELOSSW, entropy_weight=$ENTROPY_WEIGHT, ddslw=$DDSLW, dds_weight=$DDS_WEIGHT"
-echo "  ETA=true"
+echo "  ETA=true, attn_temp=$ATTN_TEMP, group_cor_dim=$GROUP_COR_DIM"
 
 cmd=(
     python train.py
@@ -43,6 +47,7 @@ cmd=(
     --gpu_id="$GPU_ID"
     --batch_size="$BATCH_SIZE"
     --min_interval="$MIN_INTERVAL"
+    --aux_channel="$AUX_CHANNEL"
     --epochs="$EPOCH"
     --progress_mode="$PROGRESS_MODE"
     --progress_log_freq="$PROGRESS_LOG_FREQ"
@@ -50,6 +55,8 @@ cmd=(
     --loss_type="$LOSS_TYPE"
     --dlossw="$DLOSSW"
     --eta
+    --attn_temp="$ATTN_TEMP"
+    --group_cor_dim="$GROUP_COR_DIM"
 )
 
 if [[ "$LOSS_TYPE" == "entropy" || "$LOSS_TYPE" == "casmvs_entropy" || "$LOSS_TYPE" == "entropy_dds" ]]; then

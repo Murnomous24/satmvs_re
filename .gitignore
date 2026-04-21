@@ -8,3 +8,6 @@ checkpoints/
 
 dsm_results/
 train_log/
+
+# file
+aux_channel.md

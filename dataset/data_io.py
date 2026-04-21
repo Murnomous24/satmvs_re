@@ -5,6 +5,8 @@ import re
 from PIL import Image
 from osgeo import gdal
 
+from dataset.preprocess import dwt_aux_channels
+
 # load depth file
 def load_pfm(file_name):
     if os.path.exists(file_name) is False:
@@ -90,7 +92,7 @@ def load_rpc_as_array(file_name):
     return data, h_min, h_max
 
 # read image(gray or color)
-def read_img(file_name):
+def read_img(file_name, aux_mode = "gray"):
     if os.path.exists(file_name) is False:
         raise Exception("read_img: img file not find")
     
@@ -100,7 +102,16 @@ def read_img(file_name):
     if len(imgs) == 3:
         res = img
     elif len(imgs) == 1:
-        res = Image.merge("RGB", (imgs[0], imgs[0], imgs[0]))
+        if aux_mode in ["gray", "gabor"]:
+            res = Image.merge("RGB", (imgs[0], imgs[0], imgs[0]))
+        elif aux_mode == "dwt":
+            gray_array = np.array(imgs[0]).astype(np.float32)
+            ch2, ch3 = dwt_aux_channels(gray_array)
+            ch2_img = Image.fromarray(np.clip(ch2, 0, 255).astype(np.uint8))
+            ch3_img = Image.fromarray(np.clip(ch3, 0, 255).astype(np.uint8))
+            res = Image.merge("RGB", (imgs[0], ch2_img, ch3_img))
+        else:
+            raise ValueError(f"read_img: unsupported aux_mode '{aux_mode}'")
     else:
         raise Exception(f"read_img: image's channel must be 3(rgb) or 1(gray), but receive {len(imgs)}")
     

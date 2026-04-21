@@ -11,7 +11,8 @@ class MVSDataset(Dataset):
             data_path,
             mode,
             view_num,
-            ref_view = 2):
+            ref_view = 2,
+            aux_mode = "gray"):
         super(MVSDataset, self).__init__()
 
         self.data_path = data_path
@@ -19,6 +20,7 @@ class MVSDataset(Dataset):
         assert self.mode in ["train", "test", "valid", "pred"]
         self.view_num = view_num
         self.ref_view = ref_view
+        self.aux_mode = aux_mode
         self.sample_list = self.build_list()
         self.sample_num = len(self.sample_list)
 
@@ -56,9 +58,9 @@ class MVSDataset(Dataset):
         for v_idx in range(self.view_num):
             # image
             if self.mode == "train":
-                image = image_augment(read_img(data[2 * v_idx]))
+                image = image_augment(read_img(data[2 * v_idx], aux_mode = self.aux_mode))
             else:
-                image = read_img(data[2 * v_idx])
+                image = read_img(data[2 * v_idx], aux_mode = self.aux_mode)
             image = np.array(image)
 
             # camera parameters
@@ -140,7 +142,7 @@ class MVSDataset(Dataset):
         # read ref/source image and camera parameters
         for v_idx in range(self.view_num):
             # image
-            image = read_img(data[2 * v_idx])
+            image = read_img(data[2 * v_idx], aux_mode = self.aux_mode)
             image = np.array(image)
 
             # camera parameters

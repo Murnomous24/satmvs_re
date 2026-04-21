@@ -12,7 +12,8 @@ class MVSDataset(Dataset):
             mode,
             view_num,
             ref_view = 2,
-            depth_range = None):
+            depth_range = None,
+            aux_mode = "gray"):
         super(MVSDataset, self).__init__()
 
         self.data_path = data_path
@@ -21,6 +22,7 @@ class MVSDataset(Dataset):
         self.view_num = view_num
         self.ref_view = ref_view
         self.depth_range = depth_range
+        self.aux_mode = aux_mode
         self.sample_list = self.build_list()
         self.sample_num = len(self.sample_list)
 
@@ -66,9 +68,9 @@ class MVSDataset(Dataset):
         for v_idx in range(self.view_num):
             # image
             if self.mode == "train":
-                image = image_augment(read_img(data[2 * v_idx]))
+                image = image_augment(read_img(data[2 * v_idx], aux_mode = self.aux_mode))
             else:
-                image = read_img(data[2 * v_idx])
+                image = read_img(data[2 * v_idx], aux_mode = self.aux_mode)
             image = np.array(image)
 
             # rpc parameters
@@ -149,9 +151,9 @@ class MVSDataset(Dataset):
         for v_idx in range(self.view_num):
             # image
             if self.mode == "train":
-                image = image_augment(read_img(data[2 * v_idx]))
+                image = image_augment(read_img(data[2 * v_idx], aux_mode = self.aux_mode))
             else:
-                image = read_img(data[2 * v_idx])
+                image = read_img(data[2 * v_idx], aux_mode = self.aux_mode)
             image = np.array(image)
 
             # rpc parameters
