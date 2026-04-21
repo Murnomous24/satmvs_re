@@ -42,7 +42,14 @@ parser.add_argument('--ref_view', type = int, default = 2, help = 'index of refe
 parser.add_argument('--ndepths', type = str, default = "64,32,8", help = "number of depths")
 parser.add_argument('--min_interval', type = float, default = 2.5, help = "min interval of each depth plane")
 parser.add_argument('--depth_inter_ratio', type = str, default = "4,2,1", help = "depth interval ratio") # TODO: what
+parser.add_argument('--loss_type', type = str, default = "casmvs", choices = ["casmvs", "entropy", "casmvs_entropy", "casmvs_dds", "entropy_dds"], help = 'training loss type')
 parser.add_argument('--dlossw', type = str, default = "0.5,1.0,2.0", help = 'depth loss weight for each stage')
+parser.add_argument('--elossw', type = str, default = "0.5,1.0,2.0", help = 'entropy loss weight for each stage; defaults to dlossw when omitted')
+parser.add_argument('--entropy_weight', type = float, default = 0.1, help = 'global entropy loss weight in casmvs_entropy mode')
+parser.add_argument('--ddslw', type = str, default = "0.5,1.0,2.0", help = 'dds loss weight for each stage; defaults to dlossw when omitted')
+parser.add_argument('--dds_weight', type = float, default = 0.05, help = 'global dds loss weight in casmvs_dds mode')
+parser.add_argument('--dds_num_bins', type = int, default = 32, help = 'number of bins for soft-histogram dds loss')
+parser.add_argument('--dds_sigma', type = float, default = 0.0, help = 'gaussian sigma for soft-histogram dds loss; <=0 means auto')
 parser.add_argument('--cr_base_chs', type = str, default = "8,8,8", help = "cost volume regularization base channels")
 parser.add_argument('--eta', action='store_true', help='use eta in cost volume')
 parser.add_argument('--attn_temp', type = float, default = 1.0, help = 'attention temperature for eta')
@@ -160,13 +167,115 @@ if args.mode in ["train", "test"]:
 model.cuda()
 
 # set model loss & optimizer
-model_loss = casmvs_loss
+if args.loss_type == "casmvs":
+    model_loss = casmvs_loss
+elif args.loss_type == "entropy":
+    model_loss = entropy_loss
+elif args.loss_type == "casmvs_entropy":
+    model_loss = casmvs_entropy_loss
+elif args.loss_type == "casmvs_dds":
+    model_loss = casmvs_dds_loss
+elif args.loss_type == "entropy_dds":
+    model_loss = entropy_dds_loss
+else:
+    raise ValueError(f"unsupported loss_type: {args.loss_type}")
 optimizer = optim.RMSprop(
     [{'params': model.parameters(), 'initial_lr': args.lr}],
     lr = args.lr,
     alpha = 0.9,
     weight_decay = args.wd
 )
+
+def parse_loss_weights(weight_str, weight_name):
+    if weight_str is None:
+        return None
+    weights = [float(weight) for weight in weight_str.split(",") if weight]
+    expected_len = len([int(depth) for depth in args.ndepths.split(",") if depth])
+    if len(weights) != expected_len:
+        raise ValueError(f"{weight_name} length must match number of stages, get {len(weights)} vs {expected_len}")
+    return weights
+
+def get_loss_config():
+    return {
+        "loss_type": args.loss_type,
+        "dlossw": parse_loss_weights(args.dlossw, "dlossw"),
+        "elossw": parse_loss_weights(args.elossw, "elossw"),
+        "entropy_weight": args.entropy_weight,
+        "ddslw": parse_loss_weights(args.ddslw, "ddslw"),
+        "dds_weight": args.dds_weight,
+        "dds_num_bins": args.dds_num_bins,
+        "dds_sigma": None if args.dds_sigma <= 0 else args.dds_sigma,
+    }
+
+def get_model_info(model):
+    model_core = model.module if isinstance(model, nn.DataParallel) else model
+    total_params = sum(parameter.numel() for parameter in model_core.parameters())
+    trainable_params = sum(
+        parameter.numel() for parameter in model_core.parameters() if parameter.requires_grad
+    )
+    return {
+        "model_name": model_core.__class__.__name__,
+        "total_params": total_params,
+        "trainable_params": trainable_params,
+    }
+
+def format_run_header():
+    loss_config = get_loss_config()
+    model_info = get_model_info(model)
+    optimizer_name = optimizer.__class__.__name__
+    current_lr = optimizer.param_groups[0]["lr"] if len(optimizer.param_groups) > 0 else None
+
+    lines = [
+        "================ Run Start ================",
+        f"time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"logdir: {cur_log_dir}",
+        f"mode: {args.mode}",
+        f"model: {args.model}",
+        f"geo_model: {args.geo_model}",
+        f"dataset_root: {args.dataset_root}",
+        f"train_path: {train_path}",
+        f"test_path: {test_path}",
+        f"resume: {args.resume}",
+        f"checkpoint: {args.train_loadckpt if args.resume else args.test_loadckpt if args.mode == 'test' else None}",
+        "",
+        "model_info:",
+        f"  model_name: {model_info['model_name']}",
+        f"  total_params: {model_info['total_params']}",
+        f"  trainable_params: {model_info['trainable_params']}",
+        "",
+        "loss_info:",
+        f"  loss_type: {loss_config['loss_type']}",
+        f"  dlossw: {loss_config['dlossw']}",
+        f"  elossw: {loss_config['elossw']}",
+        f"  entropy_weight: {loss_config['entropy_weight']}",
+        f"  ddslw: {loss_config['ddslw']}",
+        f"  dds_weight: {loss_config['dds_weight']}",
+        f"  dds_num_bins: {loss_config['dds_num_bins']}",
+        f"  dds_sigma: {loss_config['dds_sigma']}",
+        "",
+        "optimizer_info:",
+        f"  optimizer: {optimizer_name}",
+        f"  lr: {current_lr}",
+        f"  wd: {args.wd}",
+        f"  lrepochs: {args.lrepochs}",
+        "",
+        "train_setup:",
+        f"  batch_size: {args.batch_size}",
+        f"  view_num: {args.view_num}",
+        f"  ref_view: {args.ref_view}",
+        f"  ndepths: {[int(depth) for depth in args.ndepths.split(',') if depth]}",
+        f"  min_interval: {args.min_interval}",
+        f"  depth_inter_ratio: {[float(interval) for interval in args.depth_inter_ratio.split(',') if interval]}",
+        f"  cr_base_chs: {[int(ch) for ch in args.cr_base_chs.split(',') if ch]}",
+        f"  eta: {args.eta}",
+        f"  attn_temp: {args.attn_temp}",
+        f"  epochs: {args.epochs}",
+        f"  seed: {args.seed}",
+        f"  gpu_id: {args.gpu_id}",
+        "===========================================",
+        "",
+    ]
+    return "\n".join(lines)
 
 # load checkpoint if needed
 start_epoch = 1
@@ -251,12 +360,27 @@ def train_batch(sample, detailed_summary = False):
     )
 
     # get loss and backward
-    loss, depth_loss = model_loss(
+    loss_config = get_loss_config()
+    loss_outputs = model_loss(
         outputs,
         depth_gt_ms,
         mask_ms,
-        dlossw = [float(weight) for weight in args.dlossw.split(",") if weight]
+        dlossw = loss_config["dlossw"],
+        elossw = loss_config["elossw"],
+        entropy_weight = loss_config["entropy_weight"],
+        ddslw = loss_config["ddslw"],
+        dds_weight = loss_config["dds_weight"],
+        dds_num_bins = loss_config["dds_num_bins"],
+        dds_sigma = loss_config["dds_sigma"],
+        depth_values = sample_cuda["depth_values"]
     )
+    scalar_outputs = build_loss_scalar_outputs(
+        loss_outputs,
+        loss_config["loss_type"],
+        entropy_weight = loss_config["entropy_weight"],
+        dds_weight = loss_config["dds_weight"]
+    )
+    loss = scalar_outputs["loss"]
     loss.backward()
     # TODO: each batch or each loop?
     optimizer.step()
@@ -270,10 +394,6 @@ def train_batch(sample, detailed_summary = False):
     depth_final_gt = depth_gt_ms[f"stage{num_stage}"]
     mask_final = mask_ms[f"stage{num_stage}"]
     
-    scalar_outputs = {
-        "loss": loss,
-        "depth_loss": depth_loss
-    }
     image_outputs = {
         "depth_est": depth_est,
         "depth_gt": depth_final_gt,
@@ -316,18 +436,29 @@ def test_batch(sample, detailed_summary = False):
     photometric_confidence = outputs[f"stage{num_stage}"]["photometric_confidence"]
 
     # get loss
-    loss, depth_loss = model_loss(
+    loss_config = get_loss_config()
+    loss_outputs = model_loss(
         outputs,
         depth_gt_ms,
         mask_ms,
-        dlossw = [float(weight) for weight in args.dlossw.split(",") if weight]
+        dlossw = loss_config["dlossw"],
+        elossw = loss_config["elossw"],
+        entropy_weight = loss_config["entropy_weight"],
+        ddslw = loss_config["ddslw"],
+        dds_weight = loss_config["dds_weight"],
+        dds_num_bins = loss_config["dds_num_bins"],
+        dds_sigma = loss_config["dds_sigma"],
+        depth_values = sample_cuda["depth_values"]
     )
+    scalar_outputs = build_loss_scalar_outputs(
+        loss_outputs,
+        loss_config["loss_type"],
+        entropy_weight = loss_config["entropy_weight"],
+        dds_weight = loss_config["dds_weight"]
+    )
+    loss = scalar_outputs["loss"]
 
     # wrap outputs
-    scalar_outputs = {
-        "loss": loss,
-        "depth_loss": depth_loss
-    }
     image_outputs = {
         "depth_est": depth_est,
         "photometric_confidence": photometric_confidence,
@@ -363,6 +494,10 @@ def train():
         train_sampler.load_state_dict(resume_sampler_state)
 
     current_global_step = global_step
+    record_path = os.path.join(cur_log_dir, 'train_record.txt')
+    if not os.path.exists(record_path) or os.path.getsize(record_path) == 0:
+        with open(record_path, "a+", encoding="utf-8") as f:
+            f.write(format_run_header())
 
     # Include args.epochs itself so --epochs=N runs N epochs (1..N by default).
     for epoch_idx in range(start_epoch, args.epochs + 1):
@@ -448,10 +583,9 @@ def train():
         print(f"avg_test_scalars: {avg_test_scalars.mean()}")
 
         # write log
-        record_path = os.path.join(cur_log_dir, 'train_record.txt')
         current_avg_metrics = avg_test_scalars.mean()
         with open(record_path, "a+", encoding="utf-8") as f:
-            f.write(f"Epoch {epoch_idx}: {current_avg_metrics}\n")
+            f.write(f"Epoch {epoch_idx} [{args.loss_type}]: {current_avg_metrics}\n")
 
         # Keep epoch-level semantics for lrepoch milestones.
         lr_scheduler.step()
